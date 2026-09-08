@@ -710,12 +710,12 @@ output {
 }
 
 .edit-toolbar output {
-  width: calc(100% / var(--ui-stretch));
   min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
   color: #ffd400;
   font-size: 8px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   white-space: nowrap;
   transform: scaleX(var(--ui-stretch));
   transform-origin: left center;
@@ -725,18 +725,19 @@ output {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .edit-actions button {
   appearance: none;
   height: 20px;
-  min-width: 27px;
-  padding: 0 3px;
+  min-width: 25px;
+  padding: 0 2.5px;
   border: 1px solid #796500;
   background: #000000;
   color: #ffd400;
   font: 500 8px/1 var(--ui-font);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
 
@@ -751,18 +752,18 @@ output {
   z-index: 4;
   top: 54px;
   right: 0;
-  width: 174px;
+  width: 295px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-auto-rows: 25px;
+  grid-template-columns: repeat(5, 1fr);
+  grid-auto-rows: 24px;
   gap: 1px;
   padding: 0;
   background: #796500;
   border: 1px solid #796500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
   box-sizing: border-box;
-  max-height: calc(100% - 56px);
-  overflow: hidden;
+  max-height: calc(100% - 54px);
+  overflow: visible;
 }
 
 .edit-loop-cell {
@@ -776,11 +777,11 @@ output {
   background: #000000;
   color: #ffd400;
   font: 500 8px/1 var(--ui-font);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 6px;
+  padding: 0 3px;
   cursor: pointer;
   transition: background-color 90ms ease, color 90ms ease;
 }

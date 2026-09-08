@@ -60,6 +60,8 @@ const editLoop1BarBtn = document.getElementById("edit-loop-1bar");
 const editLoop2BarBtn = document.getElementById("edit-loop-2bar");
 const editLoop4BarBtn = document.getElementById("edit-loop-4bar");
 const editLoopAutoBtn = document.getElementById("edit-loop-auto");
+const editLoopPrevBtn = document.getElementById("edit-loop-prev");
+const editLoopNextBtn = document.getElementById("edit-loop-next");
 const editLoopCropBtn = document.getElementById("edit-loop-crop");
 const editLoopAuditionBtn = document.getElementById("edit-loop-audition");
 const BeatDetector = window.SamplaBeatDetector || globalThis.SamplaBeatDetector;
@@ -437,6 +439,7 @@ function drawWave(ms) {
       showBeats: editMode && Boolean(currentBeatData),
       beats: currentBeatData?.beats || [],
       bars: currentBeatData?.bars || [],
+      transients: currentBeatData?.transients || [],
       snappedBeatMs,
     },
   });
@@ -527,7 +530,11 @@ function syncEditControls() {
   const gainLabel = gain === "mixed" || Math.abs(gain) < 0.0001
     ? (gain === "mixed" ? " · MIX" : "")
     : ` · ${gain > 0 ? "+" : ""}${Math.round(gain)}DB`;
-  editRange.textContent = `${Geometry.formatEditTime(selection.start)}—${Geometry.formatEditTime(selection.end)}${gainLabel}`;
+  const musicalSpan = currentBeatData && BeatDetector?.formatMusicalLength
+    ? BeatDetector.formatMusicalLength(selection.end - selection.start, currentBeatData.beatIntervalMs)
+    : "";
+  const musicalLabel = musicalSpan ? ` · ${musicalSpan}` : "";
+  editRange.textContent = `${Geometry.formatEditTime(selection.start)}—${Geometry.formatEditTime(selection.end)}${musicalLabel}${gainLabel}`;
 }
 
 function editStatusText(ms) {
@@ -898,6 +905,8 @@ function updateEditLoopMenu() {
   if (editLoop2BarBtn) editLoop2BarBtn.disabled = disabled;
   if (editLoop4BarBtn) editLoop4BarBtn.disabled = disabled;
   if (editLoopAutoBtn) editLoopAutoBtn.disabled = disabled;
+  if (editLoopPrevBtn) editLoopPrevBtn.disabled = !hasTape;
+  if (editLoopNextBtn) editLoopNextBtn.disabled = !hasTape;
   const selection = editSelectionBounds();
   if (editLoopCropBtn) editLoopCropBtn.disabled = !selection;
   if (editLoopAuditionBtn) {
@@ -977,12 +986,15 @@ function applyEditBarPreset(barCount) {
   statusEl.textContent = `${barCount} ${barCount === 1 ? "bar" : "bars"} loop (${currentBeatData.bpm.toFixed(1)} BPM)`;
 }
 
+let autoLoopCandidateIndex = 0;
+
 function applyEditAutoLoop() {
   if (!tapeBuffer || !BeatDetector) return;
   if (!currentBeatData) updateBeatAnalysis(tapeBuffer);
   if (!currentBeatData) return;
 
-  const loop = BeatDetector.autoDetectLoop(currentBeatData, tapeLimit(), 2);
+  const loop = BeatDetector.autoDetectLoop(currentBeatData, tapeLimit(), 2, autoLoopCandidateIndex);
+  autoLoopCandidateIndex += 1;
   editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.start, 10);
   editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.end, 10);
   playheadMs = editStartMs;
@@ -990,6 +1002,65 @@ function applyEditAutoLoop() {
   showTime(playheadMs);
   drawWave(playheadMs);
   statusEl.textContent = `auto-loop: ${loop.barCount} bars (${currentBeatData.bpm.toFixed(1)} BPM)`;
+}
+
+function nudgeEditLoop(direction, stepMultiplier = 1) {
+  if (!tapeBuffer || !BeatDetector) return;
+  if (!currentBeatData) updateBeatAnalysis(tapeBuffer);
+  if (!currentBeatData) return;
+
+  const duration = tapeLimit();
+  const beatIntervalMs = currentBeatData.beatIntervalMs || 500;
+  const stepMs = beatIntervalMs * stepMultiplier;
+  const selection = editSelectionBounds();
+
+  if (!selection) {
+    const start = BeatDetector.findPrevBeat(playheadMs, currentBeatData.beats || []);
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, start, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, start + beatIntervalMs * 4, 10);
+  } else {
+    const span = selection.end - selection.start;
+    let newStart = selection.start + direction * stepMs;
+    let newEnd = newStart + span;
+
+    if (newStart < 0) {
+      newStart = 0;
+      newEnd = Math.min(duration, span);
+    } else if (newEnd > duration) {
+      newEnd = duration;
+      newStart = Math.max(0, duration - span);
+    }
+
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, newStart, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, newEnd, 10);
+  }
+
+  playheadMs = editStartMs;
+  syncEditControls();
+  showTime(playheadMs);
+  drawWave(playheadMs);
+  statusEl.textContent = `loop shifted ${direction < 0 ? "earlier" : "later"}`;
+}
+
+function seekToBeat(direction, wholeBar = false) {
+  if (!blob || mode === "record") return;
+  if (mode !== "idle") stopTransport();
+  if (!currentBeatData && tapeBuffer && BeatDetector) updateBeatAnalysis(tapeBuffer);
+  const targets = wholeBar && currentBeatData?.bars?.length
+    ? currentBeatData.bars
+    : currentBeatData?.beats;
+
+  if (!targets || !targets.length) {
+    seekFromKeyboard(playheadMs + direction * 500);
+    return;
+  }
+
+  const targetMs = direction < 0
+    ? BeatDetector.findPrevBeat(playheadMs, targets)
+    : BeatDetector.findNextBeat(playheadMs, targets);
+
+  seekFromKeyboard(targetMs);
+  statusEl.textContent = `beat: ${Geometry.formatTime(targetMs)}`;
 }
 
 function applyEditLoopCrop() {
@@ -2450,21 +2521,46 @@ function seekFromKeyboard(nextMs) {
   statusEl.textContent = `seek ${Geometry.formatTime(playheadMs)}`;
 }
 
-function adjustEditSelection(side, deltaMs) {
+function adjustEditSelection(side, deltaMs, useBeatSnap = false) {
   if (!editMode || !blob) return;
   const limit = tapeLimit();
   const selection = editSelectionBounds();
+  const beats = currentBeatData?.beats || [];
+  const shouldSnap = (useBeatSnap || loopSnapEnabled) && Boolean(BeatDetector) && beats.length > 0;
+
   if (!selection) {
-    const other = Math.max(0, Math.min(limit, playheadMs + deltaMs));
+    let other = Math.max(0, Math.min(limit, playheadMs + deltaMs));
+    if (shouldSnap) {
+      const snap = BeatDetector.snapToBeat(other, beats, 200);
+      if (snap.beatIndex >= 0) other = snap.timeMs;
+    }
     editStartMs = Math.min(playheadMs, other);
     editEndMs = Math.max(playheadMs, other);
   } else if (side === "start") {
-    editStartMs = Math.max(0, Math.min(selection.end - CROP_MIN_MS, selection.start + deltaMs));
+    let target = selection.start + deltaMs;
+    if (shouldSnap) {
+      target = deltaMs < 0
+        ? BeatDetector.findPrevBeat(selection.start, beats)
+        : BeatDetector.findNextBeat(selection.start, beats);
+    }
+    editStartMs = Math.max(0, Math.min(selection.end - CROP_MIN_MS, target));
     editEndMs = selection.end;
   } else {
+    let target = selection.end + deltaMs;
+    if (shouldSnap) {
+      target = deltaMs < 0
+        ? BeatDetector.findPrevBeat(selection.end, beats)
+        : BeatDetector.findNextBeat(selection.end, beats);
+    }
     editStartMs = selection.start;
-    editEndMs = Math.min(limit, Math.max(selection.start + CROP_MIN_MS, selection.end + deltaMs));
+    editEndMs = Math.min(limit, Math.max(selection.start + CROP_MIN_MS, target));
   }
+
+  if (tapeBuffer && BeatDetector && editSelectionBounds()) {
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editStartMs, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editEndMs, 10);
+  }
+
   syncEditControls();
   drawWave(playheadMs);
   statusEl.textContent = editSelectionBounds() ? "selection adjusted" : "extend selection";
@@ -2799,8 +2895,10 @@ document.addEventListener("keydown", (event) => {
     if (!blob || mode === "record") return;
     event.preventDefault();
     const direction = event.key === "ArrowLeft" ? -1 : 1;
-    if (editMode && (event.altKey || event.shiftKey)) {
-      adjustEditSelection(event.altKey ? "start" : "end", direction * 10);
+    if (editMode && event.altKey && event.shiftKey) {
+      nudgeEditLoop(direction);
+    } else if (editMode && (event.altKey || event.shiftKey)) {
+      adjustEditSelection(event.altKey ? "start" : "end", direction * 10, loopSnapEnabled);
     } else {
       seekFromKeyboard(playheadMs + direction * (event.shiftKey ? 1000 : 100));
     }
@@ -2808,8 +2906,14 @@ document.addEventListener("keydown", (event) => {
   }
   if ((event.key === "Home" || event.key === "End") && blob && mode !== "record") {
     event.preventDefault();
-    const bounds = editMode ? { start: 0, end: tapeLimit() } : cropBounds();
+    const selection = editSelectionBounds();
+    const bounds = editMode ? (selection || { start: 0, end: tapeLimit() }) : cropBounds();
     seekFromKeyboard(event.key === "Home" ? bounds.start : bounds.end);
+    return;
+  }
+  if ((event.key === "[" || event.key === "]") && blob && mode !== "record") {
+    event.preventDefault();
+    seekToBeat(event.key === "[" ? -1 : 1, event.shiftKey);
     return;
   }
 
@@ -2946,6 +3050,12 @@ if (editLoopSnapBtn) {
 if (editLoop1BarBtn) editLoop1BarBtn.addEventListener("click", () => applyEditBarPreset(1));
 if (editLoop2BarBtn) editLoop2BarBtn.addEventListener("click", () => applyEditBarPreset(2));
 if (editLoop4BarBtn) editLoop4BarBtn.addEventListener("click", () => applyEditBarPreset(4));
+if (editLoopPrevBtn) {
+  editLoopPrevBtn.addEventListener("click", (event) => nudgeEditLoop(-1, event.altKey ? 4 : 1));
+}
+if (editLoopNextBtn) {
+  editLoopNextBtn.addEventListener("click", (event) => nudgeEditLoop(1, event.altKey ? 4 : 1));
+}
 if (editLoopAutoBtn) editLoopAutoBtn.addEventListener("click", applyEditAutoLoop);
 if (editLoopCropBtn) editLoopCropBtn.addEventListener("click", applyEditLoopCrop);
 if (editLoopAuditionBtn) editLoopAuditionBtn.addEventListener("click", toggleEditAudition);

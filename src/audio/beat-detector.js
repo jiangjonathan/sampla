@@ -310,6 +310,26 @@
     };
   }
 
+  function extractTransients(onsetCurve, hopRate, maxTransients = 64) {
+    const transients = [];
+    const len = onsetCurve ? onsetCurve.length : 0;
+    if (len < 3) return transients;
+
+    const threshold = 0.22;
+    for (let i = 1; i < len - 1; i += 1) {
+      const val = onsetCurve[i];
+      if (val > threshold && val >= onsetCurve[i - 1] && val >= onsetCurve[i + 1]) {
+        const timeMs = Math.round((i / hopRate) * 1000);
+        transients.push({ timeMs, strength: val });
+      }
+    }
+
+    transients.sort((a, b) => b.strength - a.strength);
+    const top = transients.slice(0, maxTransients);
+    top.sort((a, b) => a.timeMs - b.timeMs);
+    return top.map((t) => t.timeMs);
+  }
+
   function detectBeats(buffer) {
     if (!buffer || !buffer.length) {
       return {
@@ -320,6 +340,7 @@
         downbeatMs: 0,
         beats: [0],
         bars: [0],
+        transients: [],
       };
     }
 
@@ -330,6 +351,7 @@
     const { onsetCurve, lowEnergy, hopRate } = computeOnsetCurve(mono, sampleRate);
     const { bpm, confidence } = estimateTempo(onsetCurve, hopRate);
     const grid = findBeatGrid(onsetCurve, lowEnergy, hopRate, bpm, durationMs);
+    const transients = extractTransients(onsetCurve, hopRate);
 
     return {
       bpm,
@@ -339,6 +361,7 @@
       downbeatMs: grid.downbeatMs,
       beats: grid.beats,
       bars: grid.bars,
+      transients,
       durationMs,
     };
   }
@@ -443,7 +466,48 @@
     };
   }
 
-  function autoDetectLoop(beatData, totalDurationMs, preferredBars = 2) {
+  function findPrevBeat(timeMs, beats) {
+    if (!beats || !beats.length) return 0;
+    const target = Number.isFinite(timeMs) ? timeMs : 0;
+    for (let i = beats.length - 1; i >= 0; i -= 1) {
+      if (beats[i] < target - 2) return beats[i];
+    }
+    return beats[0];
+  }
+
+  function findNextBeat(timeMs, beats) {
+    if (!beats || !beats.length) return 0;
+    const target = Number.isFinite(timeMs) ? timeMs : 0;
+    for (let i = 0; i < beats.length; i += 1) {
+      if (beats[i] > target + 2) return beats[i];
+    }
+    return beats[beats.length - 1];
+  }
+
+  function formatMusicalLength(durationMs, beatIntervalMs) {
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || !beatIntervalMs || beatIntervalMs <= 0) {
+      return "";
+    }
+    const barIntervalMs = beatIntervalMs * 4;
+    const bars = durationMs / barIntervalMs;
+    const roundedBars = Math.round(bars * 10) / 10;
+    if (Math.abs(bars - Math.round(bars)) < 0.08) {
+      const wholeBars = Math.round(bars);
+      return wholeBars === 1 ? "1 BAR" : `${wholeBars} BARS`;
+    }
+    const totalBeats = Math.round(durationMs / beatIntervalMs);
+    if (totalBeats > 0 && Math.abs(durationMs - totalBeats * beatIntervalMs) < beatIntervalMs * 0.15) {
+      const wholeBars = Math.floor(totalBeats / 4);
+      const remBeats = totalBeats % 4;
+      if (wholeBars > 0 && remBeats > 0) {
+        return `${wholeBars} BAR ${remBeats}b`;
+      }
+      return `${totalBeats} BEATS`;
+    }
+    return `${roundedBars.toFixed(1)} BARS`;
+  }
+
+  function autoDetectLoop(beatData, totalDurationMs, preferredBars = 2, candidateIndex = 0) {
     const bars = beatData?.bars || [];
     const barIntervalMs = beatData?.barIntervalMs || (60000 / (beatData?.bpm || 120)) * 4;
     const dur = Number.isFinite(totalDurationMs) ? totalDurationMs : bars[bars.length - 1] || 10000;
@@ -457,8 +521,21 @@
       barCount = 1;
     }
 
-    // Default start to first detected bar
-    const start = bars.length > 0 ? bars[0] : 0;
+    if (bars.length === 0) {
+      return getBarLoop(0, barCount, beatData, dur);
+    }
+
+    // Filter candidate bars that can fit barCount within track duration
+    const validCandidates = [];
+    for (let i = 0; i < bars.length; i += 1) {
+      if (bars[i] + barCount * barIntervalMs <= dur + barIntervalMs * 0.25) {
+        validCandidates.push(bars[i]);
+      }
+    }
+
+    const pool = validCandidates.length > 0 ? validCandidates : bars;
+    const index = Math.abs(Math.floor(candidateIndex || 0)) % pool.length;
+    const start = pool[index];
     return getBarLoop(start, barCount, beatData, dur);
   }
 
@@ -470,6 +547,10 @@
     snapToZeroCrossing,
     getBarLoop,
     autoDetectLoop,
+    findPrevBeat,
+    findNextBeat,
+    formatMusicalLength,
+    extractTransients,
     MIN_BPM,
     MAX_BPM,
     DEFAULT_BPM,

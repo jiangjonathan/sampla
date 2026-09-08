@@ -235,3 +235,41 @@ test("drawWave renders beat ticks and bar indicators when showBeats is true", ()
   const snappedCalls = drawCalls.filter((c) => c.fillStyle === "rgba(255, 140, 55, 0.4)");
   assert.equal(snappedCalls.length, 1, "Should render 1 snapped beat guide column");
 });
+
+test("drawWave renders bar numbers and transient markers in edit mode", () => {
+  const { canvas, ctx, drawCalls } = createMockCanvas();
+  globalThis.window = { devicePixelRatio: 1 };
+  const peaks = new Float32Array(20);
+  peaks.fill(0.3);
+
+  WaveformView.drawWave(canvas, ctx, {
+    ms: 2000,
+    waveWindowMs: 8000,
+    wavePeaks: peaks,
+    mode: "idle",
+    editMode: true,
+    editViewCenterMs: 2000,
+    editAnimationHeadRatio: null,
+    editSelection: { start: 2000, end: 4000 },
+    editMarks: [],
+    cropBounds: { start: 0, end: 8000 },
+    activeCropHandle: null,
+    hoveredCropHandle: null,
+    activeEditHandle: null,
+    hoveredEditHandle: null,
+    hasTape: true,
+    beatGrid: {
+      showBeats: true,
+      beats: [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000],
+      bars: [0, 2000, 4000],
+      transients: [500, 1500, 2500],
+      snappedBeatMs: null,
+    },
+  });
+
+  const barTextCalls = drawCalls.filter((c) => c.type === "fillText" && ["1", "2", "3"].includes(c.text));
+  assert.ok(barTextCalls.length >= 1, "Should render numeric bar badges");
+
+  const transientCalls = drawCalls.filter((c) => c.fillStyle === "rgba(255, 212, 0, 0.3)");
+  assert.ok(transientCalls.length >= 1, "Should render transient attack indicators");
+});

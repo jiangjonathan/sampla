@@ -97,7 +97,7 @@
     const bounds = cropBounds;
 
     const marksKey = (editMarks || []).map((mark) => `${mark.type}:${mark.start}:${mark.end}`).join("|");
-    const beatKey = beatGrid?.showBeats ? `${beatGrid.beats?.length}:${beatGrid.snappedBeatMs}` : "";
+    const beatKey = beatGrid?.showBeats ? `${beatGrid.beats?.length}:${beatGrid.bars?.length}:${beatGrid.snappedBeatMs}:${beatGrid.transients?.length || 0}` : "";
     const renderKey = `${w},${h},${renderMs},${waveWindowMs},${wavePeaks.length},${mode},${editMode},${playheadLeft},${waveformRight},${bounds.start},${bounds.end},${activeCropHandle},${hoveredCropHandle},${activeEditHandle},${hoveredEditHandle},${editSelection ? editSelection.start + ":" + editSelection.end : ""},${marksKey},${hasTape},${beatKey}`;
     if (!recording && canvas._lastRenderKey === renderKey) return;
     canvas._lastRenderKey = renderKey;
@@ -233,6 +233,22 @@
       const barTickH = Math.max(6, Math.round(8 * dpr));
       const snappedMs = beatGrid.snappedBeatMs;
 
+      // Draw transient indicators if present
+      if (beatGrid.transients?.length) {
+        const transW = Math.max(1, Math.round(markerWidth));
+        const transH = Math.max(2, Math.round(3 * dpr));
+        for (let t = 0; t < beatGrid.transients.length; t += 1) {
+          const transMs = beatGrid.transients[t];
+          const tx = Math.round(headX + (transMs - renderMs) / msPerPx - transW / 2);
+          if (tx + transW < 0 || tx > w) continue;
+          ctx.fillStyle = "rgba(255, 212, 0, 0.3)";
+          ctx.fillRect(tx, mid - transH / 2, transW, transH);
+        }
+      }
+
+      ctx.font = `${Math.max(8, Math.round(7 * dpr))}px "IBM Plex Mono", monospace`;
+      ctx.textBaseline = "top";
+
       for (let i = 0; i < beatGrid.beats.length; i += 1) {
         const beatMs = beatGrid.beats[i];
         const bx = Math.round(headX + (beatMs - renderMs) / msPerPx - markerWidth / 2);
@@ -253,6 +269,24 @@
           ctx.fillStyle = "#ff8c37";
           ctx.fillRect(bx, 0, markerWidth, barTickH);
           ctx.fillRect(bx, h - barTickH, markerWidth, barTickH);
+
+          // Bar number badge
+          const barIdx = (beatGrid.bars || []).indexOf(beatMs);
+          if (barIdx >= 0) {
+            const barNum = String(barIdx + 1);
+            const numW = ctx.measureText(barNum).width;
+            const pad = 2 * dpr;
+            const badgeW = numW + pad * 2;
+            const badgeH = 9 * dpr;
+            const badgeX = Math.max(1, Math.min(w - badgeW - 1, bx + markerWidth / 2 - badgeW / 2));
+            const badgeY = 1 * dpr;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fillStyle = "#ff8c37";
+            ctx.textAlign = "center";
+            ctx.fillText(barNum, badgeX + badgeW / 2, badgeY + 1 * dpr);
+            ctx.textAlign = "start";
+          }
         } else {
           ctx.fillStyle = "#555555";
           ctx.fillRect(bx, 0, markerWidth, tickH);

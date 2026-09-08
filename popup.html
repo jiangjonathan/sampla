@@ -196,7 +196,7 @@
             </div>
           </div>
           <div id="edit-loop-menu" class="edit-loop-menu" role="group" aria-label="Loop tools" hidden>
-            <button id="edit-loop-bpm-btn" class="edit-loop-cell edit-loop-bpm" type="button" title="Detected BPM (click to toggle half/double tempo)">
+            <button id="edit-loop-bpm-btn" class="edit-loop-cell edit-loop-bpm" type="button" title="Detected BPM (click to cycle half/double tempo)">
               <span id="edit-loop-bpm-value">--- BPM</span>
             </button>
             <button id="edit-loop-snap-btn" class="edit-loop-cell edit-loop-toggle active" type="button" title="Snap selection to beats" aria-pressed="true">
@@ -205,9 +205,11 @@
             <button id="edit-loop-1bar" class="edit-loop-cell" type="button" title="Select 1 bar"><span>1 BAR</span></button>
             <button id="edit-loop-2bar" class="edit-loop-cell" type="button" title="Select 2 bars"><span>2 BARS</span></button>
             <button id="edit-loop-4bar" class="edit-loop-cell" type="button" title="Select 4 bars"><span>4 BARS</span></button>
-            <button id="edit-loop-auto" class="edit-loop-cell" type="button" title="Auto-detect best loop"><span>AUTO</span></button>
-            <button id="edit-loop-crop" class="edit-loop-cell" type="button" title="Crop tape to selection"><span>CROP</span></button>
-            <button id="edit-loop-audition" class="edit-loop-cell" type="button" title="Audition loop"><span>AUDITION</span></button>
+            <button id="edit-loop-prev" class="edit-loop-cell" type="button" title="Nudge loop 1 beat earlier (Alt: 1 bar)"><span>&lt; BEAT</span></button>
+            <button id="edit-loop-next" class="edit-loop-cell" type="button" title="Nudge loop 1 beat later (Alt: 1 bar)"><span>BEAT &gt;</span></button>
+            <button id="edit-loop-auto" class="edit-loop-cell" type="button" title="Auto-detect best loop (click again to cycle candidates)"><span>AUTO</span></button>
+            <button id="edit-loop-crop" class="edit-loop-cell" type="button" title="Crop tape to loop selection"><span>CROP</span></button>
+            <button id="edit-loop-audition" class="edit-loop-cell" type="button" title="Audition loop playback"><span>AUDITION</span></button>
           </div>
           <div id="edit-fx-menu" class="edit-fx-menu" role="group" aria-label="Audio effects" hidden>
             <button id="edit-reverse" class="edit-fx-cell" type="button" disabled><span>REVERSE</span></button>
