@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../audio-buffer-ops.js");
-await import("../deck-geometry.js");
-await import("../waveform-view.js");
+await import("../src/audio/audio-buffer-ops.js");
+await import("../src/ui/deck-geometry.js");
+await import("../src/ui/waveform-view.js");
 
 const WaveformView = globalThis.SamplaWaveformView;
 const BufferOps = globalThis.SamplaBufferOps;

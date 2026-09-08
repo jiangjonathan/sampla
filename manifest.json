@@ -7,7 +7,7 @@
     "default_title": "Sampla"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background.js"
   },
   "permissions": [
     "storage",
@@ -32,11 +32,11 @@
     {
       "resources": [
         "popup.html",
-        "wave-processor.js",
-        "tape-transport-processor.js",
-        "fonts/IBMPlexMono-Regular.woff2",
-        "fonts/IBMPlexMono-Medium.woff2",
-        "fonts/IBMPlexMono-Bold.woff2"
+        "src/audio/wave-processor.js",
+        "src/audio/tape-transport-processor.js",
+        "assets/fonts/IBMPlexMono-Regular.woff2",
+        "assets/fonts/IBMPlexMono-Medium.woff2",
+        "assets/fonts/IBMPlexMono-Bold.woff2"
       ],
       "matches": ["http://*/*", "https://*/*"]
     }

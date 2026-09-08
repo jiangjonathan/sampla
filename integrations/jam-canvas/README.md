@@ -23,7 +23,15 @@ npm run jam:check
 SAMPLA_FIREBASE_API_KEY='your-rotated-key' npm run jam:deploy
 ```
 
-Then reload the unpacked extension so manifest version `0.1.43` is active. No backend or application-code change is required.
+Then reload the unpacked extension:
+
+1. Open `chrome://extensions`.
+2. Turn on **Developer mode** if it is not already enabled.
+3. If Sampla is not installed, select **Load unpacked** and choose the repository root containing `manifest.json`.
+4. If Sampla is already installed, click the reload button on its extension card.
+5. Reload any browser page where Sampla was already open.
+
+No backend or application-code change is required.
 
 `npm run jam:deploy` validates the shared configuration and manifest before deploying only `integrations/jam-canvas/hosted/` to Firebase Hosting. It never deploys the extension repository or Canvas app.
 

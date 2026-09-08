@@ -21,7 +21,7 @@ globalThis.registerProcessor = (_name, processor) => {
 };
 
 const processorSource = fs.readFileSync(
-  new URL("../tape-transport-processor.js", import.meta.url),
+  new URL("../src/audio/tape-transport-processor.js", import.meta.url),
   "utf8"
 );
 new Function(processorSource)();

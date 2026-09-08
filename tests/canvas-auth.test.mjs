@@ -12,7 +12,7 @@ const jamConfigSource = readFileSync(
   new URL("../integrations/jam-canvas/hosted/sampla-auth/config.js", import.meta.url),
   "utf8"
 );
-const backgroundSource = readFileSync(new URL("../background.js", import.meta.url), "utf8");
+const backgroundSource = readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
 const canvasApiSource = readFileSync(new URL("../integrations/jam-canvas/canvas-api.js", import.meta.url), "utf8");
 
 function loadCanvasAuth() {

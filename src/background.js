@@ -1,5 +1,5 @@
 if (typeof importScripts === "function") {
-  importScripts("integrations/jam-canvas/hosted/sampla-auth/config.js");
+  importScripts("../integrations/jam-canvas/hosted/sampla-auth/config.js");
 }
 
 const JAM_CONFIG = globalThis.SamplaJamConfig || {};
@@ -97,7 +97,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["content.js"],
+        files: ["src/content.js"],
       });
       await chrome.tabs.sendMessage(tab.id, { type: "SAMPLA_TOGGLE_WINDOW", autoRecord });
     } catch (e) {

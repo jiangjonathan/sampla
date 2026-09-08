@@ -31,8 +31,8 @@
 
   async function loadOverlayFonts(root) {
     const faces = [
-      ["fonts/IBMPlexMono-Regular.woff2", "400"],
-      ["fonts/IBMPlexMono-Medium.woff2", "500"],
+      ["assets/fonts/IBMPlexMono-Regular.woff2", "400"],
+      ["assets/fonts/IBMPlexMono-Medium.woff2", "500"],
     ];
     await Promise.all(faces.map(async ([path, weight]) => {
       const face = new FontFace("IBM Plex Mono", `url(${chrome.runtime.getURL(path)})`, {
@@ -53,8 +53,8 @@
 
     shadowRoot = hostElement.attachShadow({ mode: "open" });
 
-    const fontRegular = chrome.runtime.getURL("fonts/IBMPlexMono-Regular.woff2");
-    const fontMedium = chrome.runtime.getURL("fonts/IBMPlexMono-Medium.woff2");
+    const fontRegular = chrome.runtime.getURL("assets/fonts/IBMPlexMono-Regular.woff2");
+    const fontMedium = chrome.runtime.getURL("assets/fonts/IBMPlexMono-Medium.woff2");
     const styleEl = document.createElement("style");
     styleEl.textContent = `
       @font-face {

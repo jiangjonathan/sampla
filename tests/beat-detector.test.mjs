@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../audio-buffer-ops.js");
-await import("../beat-detector.js");
+await import("../src/audio/audio-buffer-ops.js");
+await import("../src/audio/beat-detector.js");
 
 const BeatDetector = globalThis.SamplaBeatDetector;
 const BufferOps = globalThis.SamplaBufferOps;

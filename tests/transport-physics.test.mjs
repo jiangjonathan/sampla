@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../transport-physics.js");
+await import("../src/audio/transport-physics.js");
 const { rateForMode, nextScrubPosition } = globalThis.SamplaTransportPhysics;
 
 test("deck modes map to one natural transport rate", () => {

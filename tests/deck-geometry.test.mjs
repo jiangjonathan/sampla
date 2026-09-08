@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../deck-geometry.js");
+await import("../src/ui/deck-geometry.js");
 const {
   formatTime,
   formatTrackDuration,

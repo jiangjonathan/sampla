@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../deck-geometry.js");
-await import("../deck-renderer.js");
+await import("../src/ui/deck-geometry.js");
+await import("../src/ui/deck-renderer.js");
 
 const Geometry = globalThis.SamplaDeckGeometry;
 const TapeDeckRenderer = globalThis.SamplaDeckRenderer;
@@ -88,4 +88,3 @@ test("updateTapePath caches geometry and reuses path when tension arm is steady"
   deck.updateTapePath();
   assert.equal(setDCount, 1, "unchanged geometry must not recompute path");
 });
-

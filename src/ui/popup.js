@@ -1423,8 +1423,8 @@ async function ensureTapeTransport(buffer) {
   const ctx = getAudio();
   if (!tapeTransportModuleLoad) {
     const url = typeof chrome !== "undefined" && chrome?.runtime?.getURL
-      ? chrome.runtime.getURL("tape-transport-processor.js")
-      : "tape-transport-processor.js";
+      ? chrome.runtime.getURL("src/audio/tape-transport-processor.js")
+      : "src/audio/tape-transport-processor.js";
     tapeTransportModuleLoad = ctx.audioWorklet.addModule(url).catch((error) => {
       tapeTransportModuleLoad = null;
       throw error;
@@ -1998,8 +1998,8 @@ async function ensureWaveWorklet(ctx) {
   if (!ctx || !ctx.audioWorklet) return false;
   if (!waveWorkletPromise) {
     const url = typeof chrome !== "undefined" && chrome?.runtime?.getURL
-      ? chrome.runtime.getURL("wave-processor.js")
-      : "wave-processor.js";
+      ? chrome.runtime.getURL("src/audio/wave-processor.js")
+      : "src/audio/wave-processor.js";
     waveWorkletPromise = ctx.audioWorklet
       .addModule(url)
       .then(() => {

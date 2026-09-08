@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../audio-buffer-ops.js");
+await import("../src/audio/audio-buffer-ops.js");
 const {
   createBuffer,
   invertBuffer,
@@ -128,4 +128,3 @@ test("peakInRange extracts maximum peak and handles boundary floating-point stab
   // Sub-bin intervals
   assert.equal(peakInRange(peaks, 32, 34), 0.95);
 });
-
