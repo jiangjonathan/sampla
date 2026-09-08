@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; connect-src https://www.googleapis.com/ https://identitytoolkit.googleapis.com/ https://www.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/; worker-src https://www.google.com/recaptcha/; img-src 'self' data: https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Connect Sampla to Jam</title>
+    <link rel="stylesheet" href="auth.css" />
+  </head>
+  <body>
+    <main class="card">
+      <p class="eyebrow">Jam + Sampla</p>
+      <h1>Connect your Jam account</h1>
+      <p id="status" class="status" role="status" aria-live="polite">Preparing secure sign-in&hellip;</p>
+
+      <form id="phone-form" class="auth-form" hidden>
+        <label for="phone-input">Phone number</label>
+        <input id="phone-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 416 555 0123" />
+        <button id="send-button" type="submit" disabled>Text me a code</button>
+      </form>
+
+      <form id="code-form" class="auth-form" hidden>
+        <label for="code-input">Verification code</label>
+        <p id="phone-summary" class="summary"></p>
+        <input id="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="6-digit code" />
+        <button id="verify-button" type="submit">Connect to Jam</button>
+        <div class="link-row">
+          <button id="change-button" class="link-button" type="button">Change number</button>
+          <button id="resend-button" class="link-button" type="button">Send again</button>
+        </div>
+      </form>
+
+      <div id="recaptcha-container"></div>
+      <p class="helper">This tab closes automatically when your account is connected.</p>
+    </main>
+    <script src="config.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoaded&render=explicit" async defer></script>
+  </body>
+</html>

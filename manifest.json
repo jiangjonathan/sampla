@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Sampla",
+  "version": "0.1.43",
+  "description": "A tape-machine recorder for quick voice notes.",
+  "action": {
+    "default_title": "Sampla"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabCapture",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://api.shibuyaaa.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://bop-mobile.web.app/*",
+      "https://bop-mobile.firebaseapp.com/*"
+    ]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup.html",
+        "wave-processor.js",
+        "tape-transport-processor.js",
+        "fonts/IBMPlexMono-Regular.woff2",
+        "fonts/IBMPlexMono-Medium.woff2",
+        "fonts/IBMPlexMono-Bold.woff2"
+      ],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Toggle Sampla floating tape deck"
+    }
+  }
+}

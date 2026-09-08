@@ -1,0 +1,15 @@
+{
+  "hosting": {
+    "public": "integrations/jam-canvas/hosted",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/sampla-auth/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-store" },
+          { "key": "Cross-Origin-Opener-Policy", "value": "unsafe-none" }
+        ]
+      }
+    ]
+  }
+}

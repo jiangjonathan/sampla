@@ -1,0 +1,30 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Dependencies, build output, and test artifacts
+node_modules/
+dist/
+coverage/
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+integrations/jam-canvas/hosted/sampla-auth/firebase-config.js
+
+# Chrome Web Store / local extension packaging
+_metadata/
+*.crx
+*.zip
+
+# Firebase local state
+.firebase/
+firebase-debug.log*
