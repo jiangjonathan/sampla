@@ -16,17 +16,8 @@
     "tabCapture",
     "offscreen"
   ],
-  "host_permissions": [
-    "https://api.shibuyaaa.com/*"
-  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"
-  },
-  "externally_connectable": {
-    "matches": [
-      "https://bop-mobile.web.app/*",
-      "https://bop-mobile.firebaseapp.com/*"
-    ]
   },
   "web_accessible_resources": [
     {

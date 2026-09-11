@@ -110,15 +110,7 @@ const libraryScrollThumb = document.getElementById("library-scroll-thumb");
 const libraryLoadBtn = document.getElementById("library-load");
 const libraryDeleteBtn = document.getElementById("library-delete");
 const librarySaveBtn = document.getElementById("library-save");
-const libraryUploadBtn = document.getElementById("library-upload");
 const libraryFileInput = document.getElementById("library-file-input");
-
-// Canvas Jam Auth Elements
-const canvasStatusIndicator = document.getElementById("canvas-status-indicator");
-const canvasAuthBtn = document.getElementById("canvas-auth-btn");
-const canvasAuthDialog = document.getElementById("canvas-auth-dialog");
-const canvasAuthMessage = document.getElementById("canvas-auth-message");
-const canvasAuthError = document.getElementById("canvas-auth-error");
 
 // Confirm Dialog Elements
 const confirmDialog = document.getElementById("confirm-dialog");
@@ -272,16 +264,7 @@ let editAnimationHeadRatio = null;
 const editHistory = [];
 const editRedo = [];
 
-// Subsystem Controllers: Jam Auth & Library
-const authUI = new window.SamplaCanvasAuthUI({
-  canvasStatusIndicator,
-  canvasAuthBtn,
-  canvasAuthDialog,
-  canvasAuthMessage,
-  canvasAuthError,
-  onStatus: (msg) => { statusEl.textContent = msg; },
-});
-
+// Library controller
 const libraryController = new window.SamplaLibraryController({
   trackList,
   libraryScrollbar,
@@ -289,7 +272,6 @@ const libraryController = new window.SamplaLibraryController({
   libraryLoadBtn,
   libraryDeleteBtn,
   librarySaveBtn,
-  libraryUploadBtn,
   libraryFileInput,
   libraryPanel,
   confirmDialog,
@@ -353,10 +335,6 @@ const libraryController = new window.SamplaLibraryController({
   onSwitchScreen: (screen) => { setScreenView(screen); },
   onExitEditMode: async () => {
     if (editMode) await setEditMode(false);
-  },
-  openAuthSettings: () => {
-    setSettingsOpen(true);
-    authUI.openDialog();
   },
 });
 

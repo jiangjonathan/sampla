@@ -23,17 +23,6 @@
       <div id="settings-menu" class="settings-menu" hidden>
         <div class="settings-title"><span>Settings</span></div>
         <div class="settings-list">
-          <div class="settings-row settings-auth-row">
-            <span id="canvas-status-label">JAM ACCOUNT</span>
-            <div class="settings-auth-controls">
-              <span id="canvas-status-indicator" class="settings-auth-tag">Disconnected</span>
-              <button id="canvas-auth-btn" class="settings-auth-btn" type="button"><span>Connect</span></button>
-            </div>
-          </div>
-          <div id="canvas-auth-dialog" class="settings-auth-expand" hidden>
-            <p id="canvas-auth-message" class="auth-note" aria-live="polite">Jam sign-in opens in a separate tab.</p>
-            <div id="canvas-auth-error" class="auth-error" role="alert" aria-live="assertive" hidden></div>
-          </div>
           <div class="settings-row">
             <span id="record-source-label">Record from</span>
             <div class="custom-select">
@@ -243,7 +232,6 @@
               <button id="library-load" class="library-action" type="button"><span>Load</span></button>
               <button id="library-delete" class="library-action" type="button" disabled><span>Delete</span></button>
               <button id="library-save" class="library-action" type="button" disabled><span>Save</span></button>
-              <button id="library-upload" class="library-action" type="button" disabled><span>To Jam</span></button>
             </div>
             <input id="library-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/*" multiple hidden />
           </div>
@@ -277,11 +265,8 @@
         <div class="transport-control"><span id="record-light" class="control-light record-light" aria-hidden="true"></span><button type="button" id="record" class="key record" aria-label="Record" aria-keyshortcuts="R"><svg class="key-icon key-icon-large" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor" /></svg></button><span class="key-label">REC</span></div>
       </nav>
     </main>
-    <script src="integrations/jam-canvas/hosted/sampla-auth/config.js?v=0.1.43"></script>
     <script src="src/storage.js?v=0.1.40"></script>
     <script src="src/audio/audio-export.js?v=0.1.40"></script>
-    <script src="integrations/jam-canvas/canvas-auth.js?v=0.1.43"></script>
-    <script src="integrations/jam-canvas/canvas-api.js?v=0.1.43"></script>
     <script src="src/audio/transport-physics.js?v=0.1.40"></script>
     <script src="src/ui/deck-geometry.js?v=0.1.40"></script>
     <script src="src/audio/audio-buffer-ops.js?v=0.1.40"></script>
@@ -289,7 +274,6 @@
     <script src="src/ui/deck-renderer.js?v=0.1.40"></script>
     <script src="src/audio/beat-detector.js?v=0.1.43"></script>
     <script src="src/ui/waveform-view.js?v=0.1.40"></script>
-    <script src="integrations/jam-canvas/canvas-auth-ui.js?v=0.1.43"></script>
     <script src="src/ui/library-controller.js?v=0.1.40"></script>
     <script src="src/ui/popup.js?v=0.1.43"></script>
   </body>

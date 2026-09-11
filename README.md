@@ -17,26 +17,13 @@ After changing the code, return to `chrome://extensions` and click the reload bu
 
 ## Development
 
-Run the complete test and configuration check before loading or packaging a change:
+Run the complete test suite before loading or packaging a change:
 
 ```bash
 npm run check
 ```
 
 Sampla requests access to the active tab only after a toolbar click. Tab capture and offscreen-document permissions support audio recording and playback; storage keeps recordings and preferences locally. See [SECURITY.md](SECURITY.md) for reporting and security notes.
-
-## Jam / Canvas integration
-
-The optional Jam account-linking and Canvas upload implementation is isolated in [`integrations/jam-canvas/`](integrations/jam-canvas/). Sampla's local recording and WAV export continue to work without it.
-
-The checked-in client configuration targets Jam's existing Firebase project and API. Deploying the hosted sign-in page requires explicit access from that project's owner:
-
-```bash
-npm run jam:check
-SAMPLA_FIREBASE_API_KEY='your-authorized-key' npm run jam:deploy
-```
-
-Setup, trust boundaries, and deployment details are documented in the [integration README](integrations/jam-canvas/README.md).
 
 ## Repository layout
 
@@ -54,8 +41,6 @@ sampla/
 │   └── ui/                Deck, waveform, controls, and popup logic
 ├── styles/                Extension stylesheets
 ├── assets/                Artwork, fonts, and licenses
-├── integrations/
-│   └── jam-canvas/        Optional Jam authentication and upload
 └── tests/                 Node test suite
 ```
 
@@ -67,4 +52,4 @@ Before packaging a release, run the repository checks:
 npm run check
 ```
 
-Do not include `.env` files, service-account credentials, Firebase local state, or locally built archives. These are excluded by `.gitignore`.
+Do not include `.env` files, service-account credentials, or locally built archives. These are excluded by `.gitignore`.

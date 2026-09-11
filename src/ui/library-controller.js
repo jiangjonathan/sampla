@@ -11,7 +11,6 @@
       libraryLoadBtn,
       libraryDeleteBtn,
       librarySaveBtn,
-      libraryUploadBtn,
       libraryFileInput,
       libraryPanel,
       confirmDialog,
@@ -27,7 +26,6 @@
       onStatus,
       onSwitchScreen,
       onExitEditMode,
-      openAuthSettings,
     }) {
       this.trackList = trackList;
       this.libraryScrollbar = libraryScrollbar;
@@ -35,7 +33,6 @@
       this.libraryLoadBtn = libraryLoadBtn;
       this.libraryDeleteBtn = libraryDeleteBtn;
       this.librarySaveBtn = librarySaveBtn;
-      this.libraryUploadBtn = libraryUploadBtn;
       this.libraryFileInput = libraryFileInput;
       this.libraryPanel = libraryPanel;
       this.confirmDialog = confirmDialog;
@@ -52,7 +49,6 @@
       this.onStatus = onStatus || (() => {});
       this.onSwitchScreen = onSwitchScreen || (() => {});
       this.onExitEditMode = onExitEditMode || (() => {});
-      this.openAuthSettings = openAuthSettings || (() => {});
 
       this.savedTracks = [];
       this.selectedTrackId = null;
@@ -106,7 +102,6 @@
 
       this.libraryDeleteBtn?.addEventListener("click", () => this.requestDeleteSelected());
       this.librarySaveBtn?.addEventListener("click", () => this.saveSelectedTracks());
-      this.libraryUploadBtn?.addEventListener("click", () => this.uploadSelectedTracksToJam());
 
       this.confirmCancelBtn?.addEventListener("click", () => this.closeDeleteConfirmation());
       this.confirmDeleteBtn?.addEventListener("click", () => this.confirmDeleteSelected());
@@ -192,7 +187,6 @@
       if (this.libraryLoadBtn) this.libraryLoadBtn.disabled = rec;
       if (this.libraryDeleteBtn) this.libraryDeleteBtn.disabled = rec || selectedCount === 0;
       if (this.librarySaveBtn) this.librarySaveBtn.disabled = rec || selectedCount === 0;
-      if (this.libraryUploadBtn) this.libraryUploadBtn.disabled = rec || selectedCount === 0;
     }
 
     render() {
@@ -346,71 +340,6 @@
       this.onStatus(saved === ids.length
         ? (saved === 1 ? "recording downloaded" : `${saved} recordings downloaded`)
         : `${saved} of ${ids.length} recordings downloaded`);
-    }
-
-    async uploadSelectedTracksToJam() {
-      let ids = [...this.checkedTrackIds].filter((id) => this.savedTracks.some((track) => track.id === id));
-      if (!ids.length) {
-        const fallbackId = this.selectedTrackId || this.currentTrackId || (this.savedTracks[0] && this.savedTracks[0].id);
-        if (fallbackId && this.savedTracks.some((t) => t.id === fallbackId)) {
-          ids = [fallbackId];
-        }
-      }
-
-      if (!ids.length) {
-        alert("No recordings found in library to upload. Please record or save a sample first!");
-        return;
-      }
-
-      const session = window.SamplaCanvasAuth?.getSession();
-      if (!session?.token) {
-        this.onSwitchScreen("live");
-        this.openAuthSettings();
-        alert("Please link your Jam account first in Settings.");
-        return;
-      }
-
-      const span = this.libraryUploadBtn?.querySelector("span");
-      const originalText = span ? span.textContent : "To Jam";
-      if (this.libraryUploadBtn) this.libraryUploadBtn.disabled = true;
-      if (span) span.textContent = "Uploading...";
-      this.onStatus(ids.length === 1 ? "uploading to jam" : `uploading ${ids.length} recordings to jam`);
-
-      let uploaded = 0;
-      let lastError = null;
-      for (const id of ids) {
-        try {
-          const track = await storage.get(id);
-          if (!track) continue;
-          await window.SamplaCanvasApi.uploadTrackToJam(track, this.getAudio(), {
-            bpm: track.bpm,
-            isLoop: track.isLoop,
-          });
-          uploaded += 1;
-        } catch (err) {
-          console.error("Jam upload failed", id, err);
-          lastError = err;
-        }
-      }
-
-      if (uploaded === ids.length) {
-        if (span) span.textContent = "Uploaded! ✓";
-        this.onStatus(uploaded === 1 ? "sample added to jam" : `${uploaded} samples added to jam`);
-      } else {
-        if (span) span.textContent = "Failed";
-        const msg = lastError?.message || "Upload failed";
-        if (msg.includes("Failed to fetch")) {
-          alert("Upload failed due to CORS/network restrictions in your preview. Please make sure Sampla is loaded as an unpacked extension in chrome://extensions.");
-        } else {
-          alert("Upload to Jam failed: " + msg);
-        }
-      }
-
-      setTimeout(() => {
-        if (span) span.textContent = originalText;
-        if (this.libraryUploadBtn) this.libraryUploadBtn.disabled = false;
-        this.syncActions();
-      }, 2500);
     }
 
     async loadAudioFiles(files) {
