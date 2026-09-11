@@ -39,17 +39,16 @@ function packRadii(progress) {
 
 function tapeD(leftR, rightR, armTilt) {
   const lx = LEFT.x;
-  const ly = LEFT.y;
+  const ly = LEFT.y + leftR - 1;
   const rx = RIGHT.x;
-  const ry = RIGHT.y;
-  const drop = 118 + armTilt * 6;
+  const ry = RIGHT.y + rightR - 1;
+  const rail = 221 + armTilt * 2;
   return [
-    `M ${lx} ${ly + leftR}`,
-    `C ${lx} ${ly + leftR + 36}, 78 ${drop - 8}, 78 ${drop}`,
-    `C 78 230, 118 222, 150 222`,
-    `L 240 222`,
-    `C 268 222, 312 ${drop}, 312 ${drop - 10}`,
-    `C 312 ${ry + rightR + 20}, ${rx} ${ry + rightR + 8}, ${rx} ${ry + rightR}`,
+    `M ${lx} ${ly}`,
+    `C ${lx} ${ly + 34}, 86 198, 86 ${rail}`,
+    `L 148 ${rail}`,
+    `L 242 ${rail}`,
+    `C 280 ${rail}, ${rx} ${ry + 32}, ${rx} ${ry}`,
   ].join(" ");
 }
 
@@ -62,13 +61,13 @@ export function mountTapeDeck(root, { player, reducedMotion, onBuffer } = {}) {
         <path class="tape-path" data-tape-path d="" />
         <g class="spool" data-spool="left" transform="translate(${LEFT.x} ${LEFT.y})">
           <circle r="84" />
-          <circle r="13" />
-          <path d="M0 -72 V72 M-62.4 -36 L62.4 36 M-62.4 36 L62.4 -36" />
+          <circle r="16" />
+          <path d="M0 -16 V16 M-13.9 -8 L13.9 8 M-13.9 8 L13.9 -8" />
         </g>
         <g class="spool" data-spool="right" transform="translate(${RIGHT.x} ${RIGHT.y})">
           <circle r="84" />
-          <circle r="13" />
-          <path d="M0 -72 V72 M-62.4 -36 L62.4 36 M-62.4 36 L62.4 -36" />
+          <circle r="16" />
+          <path d="M0 -16 V16 M-13.9 -8 L13.9 8 M-13.9 8 L13.9 -8" />
         </g>
         <g class="chassis">
           <path d="M148 196.5H242C244.8 196.5 246.9 199 246.4 201.7L238.4 248H151.6L143.6 201.7C143.1 199 145.2 196.5 148 196.5Z" />
