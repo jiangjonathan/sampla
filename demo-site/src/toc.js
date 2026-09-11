@@ -7,6 +7,7 @@ const SELECTORS = [
   "#sec-jam",
   "#sec-load",
   "#sec-tokens",
+  "#sec-wip",
 ];
 
 export function initToc() {

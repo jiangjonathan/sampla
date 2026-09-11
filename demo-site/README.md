@@ -70,7 +70,26 @@ demo-site/
 
 ## Tokens
 
-Documented in `src/styles.css` and on the page. Product defaults match the extension:
+Documented in `src/styles.css` and on the page.
+
+**Page chrome** (case-study layout; white canvas, not the tape deck):
+
+| Token | Default | Use |
+| --- | --- | --- |
+| `--page-bg` | `#ffffff` | Canvas |
+| `--page-fg` | `#000000` | Primary text |
+| `--page-muted` | `#64748b` | Muted UI |
+| `--page-secondary` | `#475569` | Supporting copy |
+| `--page-border` | `#cbd5e1` | Borders |
+| `--page-border-subtle` | `#e5e7eb` | Hairlines |
+| `--page-interactive` | `#0f172a` | Navy buttons |
+| `--page-interactive-hover` | `#334155` | Button hover |
+| `--prose-size` / `--prose-leading` | `1rem` / `1.55` | 16px / 24.8px |
+| `--prose-width` / `--demo-width` | `640px` / `800px` | Measure / demos |
+| `--section-gap` / `--demo-gap` | `70px` | Section and demo spacing |
+| `--demo-min-height` | `300px` | Live demo floor |
+
+**Product embeds** (scoped to `.deck-embed`):
 
 | Token | Default | Use |
 | --- | --- | --- |

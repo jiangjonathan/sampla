@@ -5,20 +5,31 @@
    ============================================================================= */
 
 :root {
-  /* Page chrome (plotdemo-like case study) */
+  /* Page chrome — light editorial case study (plotdemo) */
   --page-bg: #ffffff;
   --page-fg: #000000;
-  --page-muted: #475569;
-  --page-rule: #cbd5e1;
+  --page-muted: #64748b; /* muted UI */
+  --page-secondary: #475569; /* supporting copy */
+  --page-border: #cbd5e1;
+  --page-border-subtle: #e5e7eb;
+  --page-rule: var(--page-border);
   --page-code-bg: rgba(175, 184, 193, 0.2);
+  --page-code-block-bg: #f6f8fa;
+  --page-code-block-fg: #24292f;
+  --page-interactive: #0f172a;
+  --page-interactive-hover: #334155;
   --page-font: ui-sans-serif, system-ui, sans-serif;
+  --page-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --prose-width: 640px;
   --demo-width: 800px;
-  --prose-size: 1rem;
-  --prose-leading: 1.55;
+  --prose-size: 1rem; /* 16px */
+  --prose-leading: 1.55; /* 24.8px at 16px */
   --section-gap: 70px;
+  --demo-gap: 70px;
+  --demo-min-height: 300px;
   --page-pad: 20px;
-  --focus: #0f172a;
+  --page-pad-bottom: 140px;
+  --focus: var(--page-interactive);
 
   /* Product embeds (Sampla tape deck) */
   --bg: #000000;
@@ -65,15 +76,17 @@
 
 html {
   scrollbar-gutter: stable;
+  font-size: 16px;
 }
 
 body {
   margin: 0;
-  padding: var(--page-pad) var(--page-pad) 140px;
+  padding: var(--page-pad) var(--page-pad) var(--page-pad-bottom);
   background: var(--page-bg);
   color: var(--page-fg);
   font-family: var(--page-font);
-  font-size: 14px;
+  font-size: var(--prose-size);
+  line-height: var(--prose-leading);
 }
 
 button,
@@ -127,9 +140,9 @@ a,
 .blog-content > .footer-note,
 .blog-content > .footer-links,
 .blog-content > .token-docs,
-.blog-content > .arch,
 .blog-content > .interactive-note,
-.blog-content > .load-steps {
+.blog-content > .load-steps,
+.blog-content > .roadmap {
   max-width: var(--prose-width);
   margin-left: auto;
   margin-right: auto;
@@ -161,7 +174,8 @@ h3 {
 #sec-library,
 #sec-jam,
 #sec-load,
-#sec-tokens {
+#sec-tokens,
+#sec-wip {
   scroll-margin-top: clamp(24px, 5vh, 48px);
 }
 
@@ -177,7 +191,7 @@ p {
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--page-mono);
   font-size: 0.875em;
   padding: 0.15em 0.35em;
   border-radius: 4px;
@@ -187,7 +201,7 @@ code {
 kbd {
   display: inline-block;
   padding: 0.05em 0.4em;
-  border: 1px solid var(--page-rule);
+  border: 1px solid var(--page-border-subtle);
   border-radius: 4px;
   font-family: inherit;
   font-size: 0.85em;
@@ -223,13 +237,64 @@ select:focus-visible,
 .plot-card {
   width: 100%;
   max-width: var(--demo-width);
-  margin: 36px auto 0;
+  margin: var(--demo-gap) auto;
+}
+
+.plot-card:not(.tokens-card) .deck-embed {
+  min-height: var(--demo-min-height);
+}
+
+.plot-card.tokens-card {
+  margin: 28px auto 0;
+}
+
+.docs-code {
+  margin: 16px 0;
+  padding: 12px 0;
+  overflow-x: auto;
+  background: var(--page-code-block-bg);
+  color: var(--page-code-block-fg);
+  font: 0.85rem / 1.6 var(--page-mono);
+  tab-size: 2;
+}
+
+.docs-code code {
+  display: block;
+  padding: 0 12px;
+  background: transparent;
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.roadmap {
+  margin: 96px auto 48px;
+  text-align: center;
+}
+
+.roadmap h2 {
+  margin: 0 0 20px;
+}
+
+.roadmap ul {
+  display: inline-block;
+  margin: 0 auto 0;
+  padding-left: 1.25rem;
+  text-align: left;
+  font-size: var(--prose-size);
+  line-height: var(--prose-leading);
+}
+
+.roadmap .footer-links {
+  margin: 28px auto 0;
 }
 
 /* --- Architecture --- */
 
 .arch {
-  margin: 28px auto 20px;
+  width: 100%;
+  max-width: var(--demo-width);
+  margin: 36px auto 20px;
 }
 
 .arch-flow {
@@ -259,7 +324,7 @@ select:focus-visible,
   display: block;
   font-size: 0.8rem;
   line-height: 1.4;
-  color: var(--page-muted);
+  color: var(--page-secondary);
 }
 
 .arch-flow code {
@@ -284,7 +349,7 @@ select:focus-visible,
 
 .cta {
   display: inline-block;
-  background: #0f172a;
+  background: var(--page-interactive);
   color: #ffffff;
   text-decoration: none;
   padding: 6px 12px;
@@ -294,12 +359,12 @@ select:focus-visible,
 }
 
 .cta:hover {
-  background: #334155;
+  background: var(--page-interactive-hover);
 }
 
 .footer-note {
   margin-top: 48px;
-  color: var(--page-muted);
+  color: var(--page-secondary);
   font-size: 0.9rem;
 }
 
@@ -581,7 +646,9 @@ select:focus-visible,
 .wave-canvas {
   display: block;
   width: 100%;
-  height: 88px;
+  min-height: 180px;
+  flex: 1 1 auto;
+  height: auto;
   cursor: crosshair;
   touch-action: none;
 }

@@ -23,6 +23,7 @@
         <li><a class="toc-link" href="#sec-jam">Jam / Canvas</a></li>
         <li><a class="toc-link" href="#sec-load">Load unpacked</a></li>
         <li><a class="toc-link" href="#sec-tokens">Tokens</a></li>
+        <li><a class="toc-link" href="#sec-wip">WIP</a></li>
       </ol>
     </nav>
 
@@ -189,10 +190,10 @@
 
         <h2 id="sec-tokens">Design tokens</h2>
         <p>
-          Page chrome follows this case-study layout (white ground, system sans,
-          ~640px prose). Product UI — IBM Plex Mono, black ground, red stroke —
-          is scoped to the embeds. Tune the deck tokens below; they are CSS
-          custom properties on <code>.deck-embed</code>.
+          Page chrome follows this case-study layout: white canvas, system sans,
+          16px / 24.8px prose on a 640px measure. Product UI — IBM Plex Mono,
+          black ground, red stroke — stays inside the embeds. Tune the deck
+          tokens below; they are CSS custom properties on <code>.deck-embed</code>.
         </p>
       </article>
 
@@ -202,15 +203,26 @@
 
       <article class="blog-content">
         <aside class="token-docs" aria-label="CSS variables">
-          <h3>Page</h3>
+          <h3>Page chrome</h3>
           <dl class="docs-list">
-            <div><dt><code>--page-bg</code></dt><dd>Page background. Default <code>#ffffff</code>.</dd></div>
-            <div><dt><code>--page-fg</code></dt><dd>Body text. Default <code>#000000</code>.</dd></div>
-            <div><dt><code>--prose-width</code></dt><dd>Measure for headings and paragraphs. Default <code>640px</code>.</dd></div>
-            <div><dt><code>--demo-width</code></dt><dd>Max width for interactive embeds. Default <code>800px</code>.</dd></div>
-            <div><dt><code>--prose-size</code></dt><dd>Body size. Default <code>1rem</code>.</dd></div>
-            <div><dt><code>--prose-leading</code></dt><dd>Body line-height. Default <code>1.55</code>.</dd></div>
+            <div><dt><code>--page-bg</code></dt><dd>Canvas. Default <code>#ffffff</code>.</dd></div>
+            <div><dt><code>--page-fg</code></dt><dd>Primary text. Default <code>#000000</code>.</dd></div>
+            <div><dt><code>--page-muted</code></dt><dd>Muted UI. Default <code>#64748b</code>.</dd></div>
+            <div><dt><code>--page-secondary</code></dt><dd>Supporting copy. Default <code>#475569</code>.</dd></div>
+            <div><dt><code>--page-border</code></dt><dd>Borders. Default <code>#cbd5e1</code>.</dd></div>
+            <div><dt><code>--page-border-subtle</code></dt><dd>Hairline / kbd. Default <code>#e5e7eb</code>.</dd></div>
+            <div><dt><code>--page-interactive</code></dt><dd>Navy buttons. Default <code>#0f172a</code>.</dd></div>
+            <div><dt><code>--page-interactive-hover</code></dt><dd>Button hover. Default <code>#334155</code>.</dd></div>
+            <div><dt><code>--page-code-bg</code></dt><dd>Inline code tint. Light gray, 4px radius.</dd></div>
+            <div><dt><code>--page-code-block-bg</code></dt><dd>Code block ground. Default <code>#f6f8fa</code>.</dd></div>
+            <div><dt><code>--page-code-block-fg</code></dt><dd>Code block text. Default <code>#24292f</code>.</dd></div>
+            <div><dt><code>--prose-width</code></dt><dd>Reading measure. Default <code>640px</code>.</dd></div>
+            <div><dt><code>--demo-width</code></dt><dd>Demo card width. Default <code>800px</code>.</dd></div>
+            <div><dt><code>--prose-size</code></dt><dd>Body and headings. Default <code>1rem</code> (16px).</dd></div>
+            <div><dt><code>--prose-leading</code></dt><dd>Line-height. Default <code>1.55</code> (24.8px).</dd></div>
             <div><dt><code>--section-gap</code></dt><dd>Space above <code>h2</code>. Default <code>70px</code>.</dd></div>
+            <div><dt><code>--demo-gap</code></dt><dd>Vertical margin on demo cards. Default <code>70px</code>.</dd></div>
+            <div><dt><code>--demo-min-height</code></dt><dd>Live demo floor. Default <code>300px</code>.</dd></div>
           </dl>
           <h3>Product embeds</h3>
           <dl class="docs-list">
@@ -224,19 +236,28 @@
           </dl>
         </aside>
 
+        <section class="roadmap" aria-labelledby="sec-wip">
+          <h2 id="sec-wip">WIP</h2>
+          <ul>
+            <li>Chrome Web Store package</li>
+            <li>Playground coverage for splice, beat-snap, and reverse</li>
+            <li>Hosted deploy of this case study</li>
+          </ul>
+          <p class="footer-links">
+            <a href="https://github.com/jiangjonathan/sampla" aria-label="Sampla on GitHub">
+              <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.9 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"
+                />
+              </svg>
+            </a>
+          </p>
+        </section>
+
         <p class="footer-note">
           This site is a static case study. It does not capture tabs, store
           recordings, or talk to Jam.
-        </p>
-        <p class="footer-links">
-          <a href="https://github.com/jiangjonathan/sampla" aria-label="Sampla on GitHub">
-            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.9 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"
-              />
-            </svg>
-          </a>
         </p>
       </article>
     </main>
