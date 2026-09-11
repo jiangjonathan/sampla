@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Sampla is a Manifest V3 Chrome extension that records, trims, loops, and exports browser-tab audio in a tape-deck interface."
+    />
+    <title>Sampla — tape-machine recorder for tab audio</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <nav class="floating-toc" aria-label="On this page">
+      <ol class="toc-list">
+        <li><a class="toc-link" href="#sec-intro">Sampla</a></li>
+        <li><a class="toc-link" href="#sec-capture">Tab capture</a></li>
+        <li><a class="toc-link" href="#sec-deck">Tape transport</a></li>
+        <li><a class="toc-link" href="#sec-wave">Trim &amp; loop</a></li>
+        <li><a class="toc-link" href="#sec-library">Library &amp; WAV</a></li>
+        <li><a class="toc-link" href="#sec-jam">Jam / Canvas</a></li>
+        <li><a class="toc-link" href="#sec-load">Load unpacked</a></li>
+        <li><a class="toc-link" href="#sec-tokens">Tokens</a></li>
+      </ol>
+    </nav>
+
+    <main id="content" class="blog-container">
+      <article class="blog-content">
+        <h1 id="sec-intro">sampla</h1>
+        <p class="blog-meta">
+          A tape-machine recorder for quick voice notes. Chrome extension, Manifest&nbsp;V3.
+        </p>
+
+        <p>
+          Sampla records the active browser tab — or the microphone — into a floating
+          tape deck, then lets you trim, loop, and export WAV without opening a DAW.
+          Capture uses <code>tabCapture</code> plus an offscreen document, so the page
+          itself never sees the media stream.
+        </p>
+        <p>
+          Grabbing a few seconds of tab audio still usually means a screen recorder,
+          an editor, and a file conversion. That is too much friction for a voice note
+          or a one-bar loop. Sampla keeps the whole path on a cassette transport:
+          record, wind, crop, store.
+        </p>
+        <p>
+          The demos on this page run in the browser with a short original loop
+          synthesized on load. They do not call extension APIs.
+        </p>
+
+        <h2 id="sec-capture">Tab audio without a picker</h2>
+        <p>
+          Chrome can capture the active tab with
+          <code>chrome.tabCapture.getMediaStreamId</code>, then hand that id to an
+          offscreen document that owns the <code>AudioContext</code> and
+          <code>MediaRecorder</code>. The popup stays a UI: reels, waveform, library.
+          The offscreen document is the tape path.
+        </p>
+        <p>
+          Record sources: current tab, a region selection, microphone, or mic mixed
+          with the tab. Captured audio is monitored back to the speakers with a short
+          gain ramp so the native-output handoff does not click. Live peaks (20&nbsp;ms
+          bins) feed the waveform while you record.
+        </p>
+
+        <figure class="arch" aria-label="Capture architecture">
+          <ol class="arch-flow">
+            <li>
+              <strong>Active tab</strong>
+              <span>http(s) page only</span>
+            </li>
+            <li>
+              <strong>Service worker</strong>
+              <span><code>tabCapture</code> stream id</span>
+            </li>
+            <li>
+              <strong>Offscreen doc</strong>
+              <span>monitor + <code>MediaRecorder</code></span>
+            </li>
+            <li>
+              <strong>Popup / floating deck</strong>
+              <span>transport, crop, IndexedDB</span>
+            </li>
+          </ol>
+        </figure>
+        <p class="interactive-note">
+          The floating deck is the same <code>popup.html</code>, injected as an iframe.
+          <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> toggles it. Toolbar click
+          requests <code>activeTab</code>; nothing is captured until you press REC.
+        </p>
+
+        <h2 id="sec-deck">Tape as the transport</h2>
+        <p>
+          Rewind, play, loop, and record are hardware keys, not timeline buttons.
+          Reel rotation, tape-pack radius, and the tension arm track position the
+          same way a cassette does. The window between the reels is a seven-segment
+          timer.
+        </p>
+        <p>
+          Try the mock below. Play the original 8-second loop, wind the reels, or
+          press REC to record a new live take from an oscillator graph in this page.
+          LOOP repeats the current tape.
+        </p>
+      </article>
+
+      <section class="plot-card" aria-labelledby="sec-deck">
+        <div id="demo-deck"></div>
+        <p class="interactive-note">
+          Synthetic audio, generated here — not tab capture. Space plays or stops
+          when the deck is focused. <kbd>R</kbd> records, <kbd>L</kbd> loops.
+        </p>
+      </section>
+
+      <article class="blog-content">
+        <h2 id="sec-wave">Trim, loop, light FX</h2>
+        <p>
+          The waveform is the splice block. Drag the yellow crop handles to set
+          in/out points. LOOP plays only that range. SPEED here changes playback
+          rate so you can hear it immediately; in the extension, speed
+          <em>resamples</em> the selection onto the tape (0.05×–20×) so the export
+          matches what you heard.
+        </p>
+        <p>
+          The product also has reverse, fade in/out, ±3&nbsp;dB, cut/copy/paste,
+          undo/redo, and beat-snap bar loops (1 / 2 / 4 bars, plus auto-detect).
+          Those stay in the extension. This playground is the trim/loop/speed path
+          you use constantly.
+        </p>
+        <p>
+          The real deck windows the tape around a centered playhead. This view
+          shows the whole clip so the crop is obvious.
+        </p>
+      </article>
+
+      <section class="plot-card" aria-labelledby="sec-wave">
+        <div id="demo-wave"></div>
+        <p class="interactive-note">
+          Drag handles to crop. Click the tape to seek. Arrow keys nudge the
+          playhead; Shift+arrows move the out point.
+        </p>
+      </section>
+
+      <article class="blog-content">
+        <h2 id="sec-library">Local library, WAV out</h2>
+        <p>
+          STORE writes the cropped tape into IndexedDB (<code>sampla-library</code>).
+          The library lists local recordings; you can reload, rename, delete, or
+          export. Export is 16-bit PCM WAV, named from the track title. Quiet ends
+          can be auto-trimmed on new recordings.
+        </p>
+        <p>
+          Nothing leaves the machine unless you opt into Jam. Use Export WAV on the
+          playground above to download the current crop — same container the
+          extension writes.
+        </p>
+
+        <h2 id="sec-jam">Optional Jam / Canvas</h2>
+        <p>
+          Account linking and Canvas upload live in
+          <code>integrations/jam-canvas/</code>. Local recording and WAV export
+          continue to work without it. The hosted sign-in page is a separate
+          deploy; this site does not include Firebase keys or Jam credentials.
+        </p>
+
+        <h2 id="sec-load">Load unpacked</h2>
+        <p>
+          Sampla is not a packaged Web Store build in this repository. Load it as
+          an unpacked extension:
+        </p>
+        <ol class="load-steps">
+          <li>Clone or download <a href="https://github.com/jiangjonathan/sampla">github.com/jiangjonathan/sampla</a>.</li>
+          <li>Open <code>chrome://extensions</code> and turn on Developer mode.</li>
+          <li>Select <strong>Load unpacked</strong>.</li>
+          <li>Choose the repository root — the folder that contains <code>manifest.json</code>.</li>
+          <li>
+            Pin Sampla, open an ordinary http(s) page, then click the toolbar icon
+            or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.
+          </li>
+        </ol>
+        <p>
+          After code changes, reload the extension card and any page where the
+          floating deck was already open. Requires Chrome and Node 20+ for
+          <code>npm run check</code>.
+        </p>
+        <p class="cta-row">
+          <a class="cta" href="https://github.com/jiangjonathan/sampla">View the repository</a>
+        </p>
+
+        <h2 id="sec-tokens">Design tokens</h2>
+        <p>
+          Page chrome follows this case-study layout (white ground, system sans,
+          ~640px prose). Product UI — IBM Plex Mono, black ground, red stroke —
+          is scoped to the embeds. Tune the deck tokens below; they are CSS
+          custom properties on <code>.deck-embed</code>.
+        </p>
+      </article>
+
+      <section class="plot-card tokens-card" aria-labelledby="sec-tokens">
+        <div id="demo-tokens"></div>
+      </section>
+
+      <article class="blog-content">
+        <aside class="token-docs" aria-label="CSS variables">
+          <h3>Page</h3>
+          <dl class="docs-list">
+            <div><dt><code>--page-bg</code></dt><dd>Page background. Default <code>#ffffff</code>.</dd></div>
+            <div><dt><code>--page-fg</code></dt><dd>Body text. Default <code>#000000</code>.</dd></div>
+            <div><dt><code>--prose-width</code></dt><dd>Measure for headings and paragraphs. Default <code>640px</code>.</dd></div>
+            <div><dt><code>--demo-width</code></dt><dd>Max width for interactive embeds. Default <code>800px</code>.</dd></div>
+            <div><dt><code>--prose-size</code></dt><dd>Body size. Default <code>1rem</code>.</dd></div>
+            <div><dt><code>--prose-leading</code></dt><dd>Body line-height. Default <code>1.55</code>.</dd></div>
+            <div><dt><code>--section-gap</code></dt><dd>Space above <code>h2</code>. Default <code>70px</code>.</dd></div>
+          </dl>
+          <h3>Product embeds</h3>
+          <dl class="docs-list">
+            <div><dt><code>--bg</code></dt><dd>Deck ground. Default <code>#000000</code>.</dd></div>
+            <div><dt><code>--line</code></dt><dd>Stroke, keys, waveform. Default <code>#ff0000</code>.</dd></div>
+            <div><dt><code>--dim</code></dt><dd>Disabled / idle red. Default <code>#7a1010</code>.</dd></div>
+            <div><dt><code>--tape</code></dt><dd>Tape pack fill. Default <code>#ffffff</code>.</dd></div>
+            <div><dt><code>--edit</code></dt><dd>Crop / edit accent. Default <code>#ffd400</code>.</dd></div>
+            <div><dt><code>--ui-font</code></dt><dd>IBM Plex Mono stack.</dd></div>
+            <div><dt><code>--stroke</code></dt><dd>Hairline width. Default <code>1px</code>.</dd></div>
+          </dl>
+        </aside>
+
+        <p class="footer-note">
+          This site is a static case study. It does not capture tabs, store
+          recordings, or talk to Jam.
+        </p>
+        <p class="footer-links">
+          <a href="https://github.com/jiangjonathan/sampla" aria-label="Sampla on GitHub">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.9 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"
+              />
+            </svg>
+          </a>
+        </p>
+      </article>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -2,6 +2,8 @@
 
 Sampla is a Manifest V3 Chrome extension for quickly recording, trimming, looping, and exporting browser-tab audio in a tape-deck interface.
 
+A static case-study site with interactive tape-deck and waveform demos lives in [`demo-site/`](demo-site/). It does not change extension behaviour.
+
 ## Load the extension in Chrome
 
 Requirements: a current version of Chrome and Node.js 20 or newer.
@@ -56,7 +58,8 @@ sampla/
 ├── assets/                Artwork, fonts, and licenses
 ├── integrations/
 │   └── jam-canvas/        Optional Jam authentication and upload
-└── tests/                 Node test suite
+├── tests/                 Node test suite
+└── demo-site/             Static case-study site (Vite)
 ```
 
 ## Packaging
