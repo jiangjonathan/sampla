@@ -95,8 +95,25 @@
     remove(id) {
       return this.provider.remove(id);
     },
+
+    async getStemsForParent(parentId) {
+      if (!parentId) return [];
+      const all = await this.list();
+      return all.filter((track) => track.parentId === parentId && track.isStem);
+    },
+
+    async removeWithChildren(id) {
+      if (!id) return;
+      const all = await this.list();
+      const children = all.filter((track) => track.parentId === id);
+      for (const child of children) {
+        await this.remove(child.id);
+      }
+      return this.remove(id);
+    },
   };
 
-  window.SamplaStorage = recordingStorage.use(new IndexedDbRecordingProvider());
-  window.SamplaStorage.IndexedDbProvider = IndexedDbRecordingProvider;
+  const target = typeof window !== "undefined" ? window : globalThis;
+  target.SamplaStorage = recordingStorage.use(new IndexedDbRecordingProvider());
+  target.SamplaStorage.IndexedDbProvider = IndexedDbRecordingProvider;
 })();

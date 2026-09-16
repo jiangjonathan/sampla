@@ -128,3 +128,13 @@ test("peakInRange extracts maximum peak and handles boundary floating-point stab
   // Sub-bin intervals
   assert.equal(peakInRange(peaks, 32, 34), 0.95);
 });
+
+test("markEditedRange does not emit boundary cut markers when trimming start or end", () => {
+  // Trimming the start from 0 to 1000
+  const startTrim = markEditedRange([], "cut", 0, 1000, 0, 9000);
+  assert.equal(startTrim.length, 0);
+
+  // Trimming the end from 8000 to 9000 (tapeEndMs is 8000 after cut)
+  const endTrim = markEditedRange([], "cut", 8000, 9000, 0, 8000);
+  assert.equal(endTrim.length, 0);
+});

@@ -7,6 +7,11 @@ let recordedChunks = [];
 let peakInterval = null;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "OFFSCREEN_PING") {
+    sendResponse({ ok: true });
+    return;
+  }
+
   if (message?.type === "OFFSCREEN_START_CAPTURE") {
     (async () => {
       try {
@@ -190,6 +195,15 @@ function cleanupCapture() {
     try { audioContext.close(); } catch {}
     audioContext = null;
   }
-  playbackGain = null;
+  const recorder = mediaRecorder;
   mediaRecorder = null;
+  if (recorder) {
+    recorder.ondataavailable = null;
+    recorder.onstop = null;
+    if (recorder.state !== "inactive") {
+      try { recorder.stop(); } catch {}
+    }
+  }
+  recordedChunks = [];
+  playbackGain = null;
 }

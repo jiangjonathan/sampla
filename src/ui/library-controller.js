@@ -2,6 +2,7 @@
   const Geometry = root.SamplaDeckGeometry || window.SamplaDeckGeometry;
   const storage = root.SamplaStorage || window.SamplaStorage;
   const exporter = root.SamplaAudioExport || window.SamplaAudioExport;
+  const BufferOps = root.SamplaBufferOps || window.SamplaBufferOps;
 
   class LibraryController {
     constructor({
@@ -54,6 +55,7 @@
       this.selectedTrackId = null;
       this.currentTrackId = null;
       this.checkedTrackIds = new Set();
+      this.expandedParentIds = new Set();
       this.pendingDeleteIds = [];
       this.confirmReturnFocus = null;
       this.scrollbarPointerId = null;
@@ -64,7 +66,15 @@
 
     init() {
       this.trackList?.addEventListener("click", (event) => {
-        const loadButton = event.target.closest(".track-load");
+        const target = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
+        const toggleBtn = target?.closest?.(".track-stem-badge");
+        if (toggleBtn) {
+          event.stopPropagation();
+          event.preventDefault();
+          this.toggleParentExpansion(toggleBtn.dataset.id);
+          return;
+        }
+        const loadButton = target?.closest?.(".track-load");
         if (loadButton) {
           this.setSelectedTrack(loadButton.dataset.id);
           this.loadSelectedTrack();
@@ -102,6 +112,11 @@
 
       this.libraryDeleteBtn?.addEventListener("click", () => this.requestDeleteSelected());
       this.librarySaveBtn?.addEventListener("click", () => this.saveSelectedTracks());
+      if (typeof BroadcastChannel !== "undefined") {
+        this.libraryUpdates = new BroadcastChannel("sampla-library");
+        this.libraryUpdates.unref?.();
+        this.libraryUpdates.onmessage = () => this.refresh().catch(() => this.onStatus("library refresh failed"));
+      }
 
       this.confirmCancelBtn?.addEventListener("click", () => this.closeDeleteConfirmation());
       this.confirmDeleteBtn?.addEventListener("click", () => this.confirmDeleteSelected());
@@ -172,8 +187,16 @@
       return `TAPE ${String(used + 1).padStart(3, "0")}`;
     }
 
+    nextRemixName(track) {
+      return (track.name || "STEM").replace(/\s+\(Remix(?:\s+\d+)?\)$/i, "").trim();
+    }
+
     setSelectedTrack(id) {
       this.selectedTrackId = this.savedTracks.some((track) => track.id === id) ? id : null;
+      const selected = this.savedTracks.find((track) => track.id === id);
+      if (selected?.parentId) {
+        this.expandedParentIds.add(selected.parentId);
+      }
       this.trackList.querySelectorAll(".track-row").forEach((row) => {
         const current = row.dataset.id === this.selectedTrackId;
         row.classList.toggle("current", current);
@@ -189,37 +212,166 @@
       if (this.librarySaveBtn) this.librarySaveBtn.disabled = rec || selectedCount === 0;
     }
 
+    toggleParentExpansion(id) {
+      if (!id) return;
+      if (this.expandedParentIds.has(id)) {
+        this.expandedParentIds.delete(id);
+      } else {
+        this.expandedParentIds.add(id);
+      }
+      this.render();
+    }
+
     render() {
-      const rows = this.savedTracks.map((track) => {
-        const row = document.createElement("div");
-        row.className = "track-row";
-        row.setAttribute("role", "listitem");
-        row.dataset.id = track.id;
+      const parentTracks = [];
+      const childrenByParent = new Map();
+      const allIds = new Set(this.savedTracks.map((t) => t.id));
+
+      for (const track of this.savedTracks) {
+        if (track.parentId && allIds.has(track.parentId)) {
+          if (!childrenByParent.has(track.parentId)) {
+            childrenByParent.set(track.parentId, []);
+          }
+          childrenByParent.get(track.parentId).push(track);
+        } else {
+          parentTracks.push(track);
+        }
+      }
+
+      const stemOrder = { vocals: 0, drums: 1, bass: 2, other: 3 };
+      const rows = [];
+
+      for (const parent of parentTracks) {
+        const isCurrent = parent.id === this.selectedTrackId;
+        const children = childrenByParent.get(parent.id) || [];
+        const stemChildren = children.filter((c) => c.isStem);
+        const hasChildren = children.length > 0 || parent.hasStems;
+        const isExpanded = this.expandedParentIds.has(parent.id);
+
+        const parentRow = document.createElement("div");
+        parentRow.className = "track-row";
+        if (isCurrent) parentRow.classList.add("current");
+        if (hasChildren) parentRow.classList.add("has-stems");
+        parentRow.setAttribute("role", "listitem");
+        parentRow.dataset.id = parent.id;
+
         const check = document.createElement("input");
         check.type = "checkbox";
         check.className = "track-check";
-        check.dataset.id = track.id;
-        check.checked = this.checkedTrackIds.has(track.id);
-        check.setAttribute("aria-label", `Select ${track.name}`);
+        check.dataset.id = parent.id;
+        check.checked = this.checkedTrackIds.has(parent.id);
+        check.setAttribute("aria-label", `Select ${parent.name}`);
+
         const load = document.createElement("button");
         load.type = "button";
         load.className = "track-load";
-        load.dataset.id = track.id;
-        load.setAttribute("aria-label", `Load ${track.name}`);
-        const name = document.createElement("span");
-        name.className = "track-row-name";
-        name.textContent = track.name;
+        load.dataset.id = parent.id;
+        load.setAttribute("aria-label", `Load ${parent.name}`);
+
+        const nameContainer = document.createElement("span");
+        nameContainer.className = "track-row-name";
+
+        const nameText = document.createElement("span");
+        nameText.className = "track-name-text";
+        nameText.textContent = parent.name;
+        nameContainer.append(nameText);
+
+        if (hasChildren) {
+          const badge = document.createElement("span");
+          badge.className = "track-stem-badge";
+          if (isExpanded) badge.classList.add("active");
+          badge.dataset.id = parent.id;
+          badge.setAttribute("role", "button");
+          badge.setAttribute("tabindex", "0");
+          badge.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+          badge.setAttribute("aria-label", isExpanded ? `Collapse stems for ${parent.name}` : `Expand stems for ${parent.name}`);
+          badge.textContent = `${stemChildren.length || 4} STEMS`;
+
+          const handleToggle = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            this.toggleParentExpansion(parent.id);
+          };
+          badge.addEventListener("click", handleToggle);
+          badge.addEventListener("pointerdown", (e) => {
+            e.stopPropagation();
+          });
+          badge.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              handleToggle(e);
+            }
+          });
+
+          nameContainer.append(badge);
+        }
+
         const duration = document.createElement("span");
         duration.className = "track-row-duration";
-        duration.textContent = Geometry.formatTrackDuration(track.durationMs);
-        load.append(name, duration);
-        row.append(check, load);
-        return row;
-      });
+        duration.textContent = Geometry.formatTrackDuration(parent.durationMs);
+
+        load.append(nameContainer, duration);
+        parentRow.append(check, load);
+        rows.push(parentRow);
+
+        if (isExpanded && children.length > 0) {
+          const sortedChildren = [...children].sort((a, b) => {
+            if (a.isStem && b.isStem) {
+              return (stemOrder[a.stemType] ?? 99) - (stemOrder[b.stemType] ?? 99);
+            }
+            if (a.isStem && !b.isStem) return -1;
+            if (!a.isStem && b.isStem) return 1;
+            return a.createdAt - b.createdAt;
+          });
+
+          for (const child of sortedChildren) {
+            const childRow = document.createElement("div");
+            childRow.className = "track-row stem-child-row";
+            childRow.setAttribute("role", "listitem");
+            childRow.dataset.id = child.id;
+            childRow.dataset.parentId = parent.id;
+
+            const childCheck = document.createElement("input");
+            childCheck.type = "checkbox";
+            childCheck.className = "track-check";
+            childCheck.dataset.id = child.id;
+            childCheck.checked = this.checkedTrackIds.has(child.id);
+            childCheck.setAttribute("aria-label", `Select ${child.name}`);
+
+            const childLoad = document.createElement("button");
+            childLoad.type = "button";
+            childLoad.className = "track-load";
+            childLoad.dataset.id = child.id;
+            childLoad.setAttribute("aria-label", `Load ${child.name}`);
+
+            const childNameContainer = document.createElement("span");
+            childNameContainer.className = "track-row-name child-name";
+
+            const childNameText = document.createElement("span");
+            childNameText.className = "track-name-text";
+            childNameText.textContent = (child.isStem && child.stemType
+              ? child.stemType
+              : child.name).toUpperCase();
+            childNameContainer.append(childNameText);
+
+            const childDuration = document.createElement("span");
+            childDuration.className = "track-row-duration";
+            childDuration.textContent = Geometry.formatTrackDuration(child.durationMs);
+
+            childLoad.append(childNameContainer, childDuration);
+            childRow.append(childCheck, childLoad);
+            rows.push(childRow);
+          }
+        }
+      }
+
       this.trackList.replaceChildren(...rows);
       this.setSelectedTrack(this.currentTrackId);
       this.syncActions();
-      requestAnimationFrame(() => this.updateScrollbar());
+      if (typeof requestAnimationFrame !== "undefined") {
+        requestAnimationFrame(() => this.updateScrollbar());
+      }
     }
 
     async refresh() {
@@ -246,9 +398,42 @@
       this.libraryScrollbar.classList.toggle("inactive", maxScroll === 0);
     }
 
-    async persistCurrentTape({ blob, buffer, cropBounds, editMarks, bpm, isLoop }) {
+    async persistCurrentTape({ blob, buffer, cropBounds, editMarks, bpm, isLoop, stemDerived }) {
       if (!this.currentTrackId || !blob || !buffer) return false;
       const existing = this.savedTracks.find((track) => track.id === this.currentTrackId);
+      if (existing?.isStem) {
+        const remixName = this.trackNameInput.value.trim() || this.nextRemixName(existing);
+        const newId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        const record = {
+          id: newId,
+          parentId: existing.parentId || existing.id,
+          name: remixName,
+          durationMs: cropBounds.end - cropBounds.start,
+          tapeDurationMs: buffer.duration * 1000,
+          cropStartMs: cropBounds.start,
+          cropEndMs: cropBounds.end,
+          editMarks: (editMarks || []).map((mark) => ({ ...mark })),
+          bpm: bpm !== undefined ? bpm : existing?.bpm || null,
+          isLoop: isLoop !== undefined ? Boolean(isLoop) : Boolean(existing?.isLoop),
+          isStem: false,
+          isRemix: true,
+          stemDerived: true,
+          blob,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        try {
+          await storage.put(record);
+          this.currentTrackId = newId;
+          this.trackNameInput.value = remixName;
+          if (existing.parentId) this.expandedParentIds.add(existing.parentId);
+          await this.refresh();
+          return true;
+        } catch {
+          this.onStatus("library unavailable");
+          return false;
+        }
+      }
       const name = this.trackNameInput.value.trim() || existing?.name || this.nextTrackName();
       const record = {
         id: this.currentTrackId,
@@ -260,6 +445,7 @@
         editMarks: (editMarks || []).map((mark) => ({ ...mark })),
         bpm: bpm !== undefined ? bpm : existing?.bpm || null,
         isLoop: isLoop !== undefined ? Boolean(isLoop) : Boolean(existing?.isLoop),
+        stemDerived: Boolean(stemDerived) || Boolean(existing?.stemDerived),
         blob,
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
@@ -275,9 +461,88 @@
       }
     }
 
-    async storeTape({ blob, buffer, cropBounds, editMarks, bpm, isLoop }) {
+    _hardCropIfNeeded({ buffer, blob, cropBounds, editMarks }) {
+      if (!buffer || !cropBounds) return { buffer, blob, cropBounds, editMarks: editMarks || [] };
+      const durationMs = (buffer.duration || 0) * 1000;
+      const startMs = Math.max(0, Math.min(cropBounds.start ?? 0, durationMs));
+      const endMs = Math.max(startMs, Math.min(cropBounds.end ?? durationMs, durationMs));
+      if (startMs <= 1 && endMs >= durationMs - 1) {
+        return { buffer, blob, cropBounds: { start: 0, end: durationMs }, editMarks: editMarks || [] };
+      }
+      const croppedDurationMs = Math.max(0, endMs - startMs);
+      let croppedBuffer = buffer;
+      let croppedBlob = blob;
+      if (buffer.numberOfChannels && buffer.sampleRate && BufferOps && typeof BufferOps.copyBufferRange === "function") {
+        try {
+          const audioCtx = this.getAudio?.();
+          const startFrame = Math.max(0, Math.floor((startMs / 1000) * buffer.sampleRate));
+          const endFrame = Math.min(buffer.length, Math.ceil((endMs / 1000) * buffer.sampleRate));
+          croppedBuffer = BufferOps.copyBufferRange(buffer, startFrame, endFrame, audioCtx);
+          if (exporter && typeof exporter.toWavBlob === "function") {
+            croppedBlob = exporter.toWavBlob(croppedBuffer);
+          }
+        } catch {}
+      } else if (typeof buffer.duration === "number") {
+        croppedBuffer = { ...buffer, duration: croppedDurationMs / 1000 };
+      }
+      const remappedMarks = (editMarks || [])
+        .filter((mark) => (mark.type === "cut" ? mark.start >= startMs && mark.start <= endMs : mark.end > startMs && mark.start < endMs))
+        .map((mark) => ({
+          ...mark,
+          start: Math.max(0, mark.start - startMs),
+          end: Math.min(croppedDurationMs, mark.end - startMs),
+        }));
+      return {
+        buffer: croppedBuffer,
+        blob: croppedBlob,
+        cropBounds: { start: 0, end: croppedDurationMs },
+        editMarks: remappedMarks,
+      };
+    }
+
+    async storeTape({ blob, buffer, cropBounds, editMarks, bpm, isLoop, stemDerived }) {
       if (!blob || !buffer) return;
+      const cropped = this._hardCropIfNeeded({ buffer, blob, cropBounds, editMarks });
+      buffer = cropped.buffer;
+      blob = cropped.blob;
+      cropBounds = cropped.cropBounds;
+      editMarks = cropped.editMarks;
       const existing = this.savedTracks.find((track) => track.id === this.currentTrackId);
+      if (existing?.isStem) {
+        const remixName = this.trackNameInput.value.trim() || this.nextRemixName(existing);
+        const newId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        const record = {
+          id: newId,
+          parentId: existing.parentId || existing.id,
+          name: remixName,
+          durationMs: cropBounds.end - cropBounds.start,
+          tapeDurationMs: buffer.duration * 1000,
+          cropStartMs: cropBounds.start,
+          cropEndMs: cropBounds.end,
+          editMarks: editMarks.map((mark) => ({ ...mark })),
+          bpm: bpm !== undefined ? bpm : existing?.bpm || null,
+          isLoop: isLoop !== undefined ? Boolean(isLoop) : Boolean(existing?.isLoop),
+          isStem: false,
+          isRemix: true,
+          stemDerived: true,
+          blob,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        try {
+          await storage.put(record);
+          this.currentTrackId = newId;
+          this.trackNameInput.value = remixName;
+          if (existing.parentId) this.expandedParentIds.add(existing.parentId);
+          await this.refresh();
+          await this.onExitEditMode();
+          this.onSwitchScreen("library");
+          this.onStatus("recording stored");
+        } catch {
+          this.onStatus("library unavailable");
+        }
+        return;
+      }
       const id = this.currentTrackId || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
       const name = this.trackNameInput.value.trim() || this.nextTrackName();
       const record = {
@@ -290,6 +555,7 @@
         editMarks: editMarks.map((mark) => ({ ...mark })),
         bpm: bpm !== undefined ? bpm : existing?.bpm || null,
         isLoop: isLoop !== undefined ? Boolean(isLoop) : Boolean(existing?.isLoop),
+        stemDerived: Boolean(stemDerived) || Boolean(existing?.stemDerived),
         blob,
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
@@ -320,7 +586,7 @@
       }
       if (!track || this.selectedTrackId !== id) return;
       this.currentTrackId = track.id;
-      this.trackNameInput.value = track.name;
+      this.trackNameInput.value = track.isStem ? this.nextRemixName(track) : track.name;
       this.onLoadTrack(track);
     }
 
@@ -430,24 +696,148 @@
       this.confirmDialog.hidden = true;
       this.pendingDeleteIds = [];
       this.onStatus("deleting recording");
-      const results = await Promise.allSettled(ids.map((id) => storage.remove(id)));
-      const deletedIds = ids.filter((id, index) => results[index].status === "fulfilled");
+      const childIdsToDelete = [];
+      for (const id of ids) {
+        const children = this.savedTracks.filter((t) => t.parentId === id);
+        for (const child of children) {
+          if (!ids.includes(child.id)) childIdsToDelete.push(child.id);
+        }
+      }
+      const allIdsToDelete = [...ids, ...childIdsToDelete];
+      const results = await Promise.allSettled(allIdsToDelete.map((id) => storage.remove(id)));
+      const deletedIds = allIdsToDelete.filter((id, index) => results[index].status === "fulfilled");
       deletedIds.forEach((id) => this.checkedTrackIds.delete(id));
       if (deletedIds.includes(this.currentTrackId)) {
         this.currentTrackId = null;
-        this.onClearTrack();
+        this.onClearTrack?.();
       }
       if (deletedIds.includes(this.selectedTrackId)) this.selectedTrackId = null;
       try {
         await this.refresh();
-        this.onStatus(deletedIds.length === ids.length
-          ? (deletedIds.length === 1 ? "recording deleted" : `${deletedIds.length} recordings deleted`)
-          : `${deletedIds.length} of ${ids.length} recordings deleted`);
+        this.onStatus(ids.length === 1
+          ? "recording deleted"
+          : `${ids.length} recordings deleted`);
       } catch {
         this.onStatus(deletedIds.length ? "recordings deleted; refresh failed" : "delete failed");
       }
       this.libraryDeleteBtn?.focus();
       this.confirmReturnFocus = null;
+    }
+
+    async storeStemMix({ blob, buffer, cropBounds, editMarks, bpm, isLoop, parentId }) {
+      if (!blob || !buffer) return null;
+      const cropped = this._hardCropIfNeeded({ buffer, blob, cropBounds, editMarks });
+      buffer = cropped.buffer;
+      blob = cropped.blob;
+      cropBounds = cropped.cropBounds;
+      editMarks = cropped.editMarks;
+      const parent = this.savedTracks.find((t) => t.id === parentId) || this.savedTracks.find((t) => t.id === this.currentTrackId);
+      const baseName = parent?.name || this.trackNameInput.value.trim() || "TAPE";
+      const name = `${baseName} (Mix)`.slice(0, 48);
+      const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      const record = {
+        id,
+        parentId: parent?.id || this.currentTrackId,
+        name,
+        durationMs: cropBounds.end - cropBounds.start,
+        tapeDurationMs: buffer.duration * 1000,
+        cropStartMs: cropBounds.start,
+        cropEndMs: cropBounds.end,
+        editMarks: (editMarks || []).map((mark) => ({ ...mark })),
+        bpm: bpm !== undefined ? bpm : parent?.bpm || null,
+        isLoop: isLoop !== undefined ? Boolean(isLoop) : Boolean(parent?.isLoop),
+        stemDerived: true,
+        isMix: true,
+        blob,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      try {
+        await storage.put(record);
+        if (parent?.id) this.expandedParentIds.add(parent.id);
+        await this.refresh();
+        this.onStatus("stem mix stored");
+        return record;
+      } catch {
+        this.onStatus("library unavailable");
+        return null;
+      }
+    }
+
+    async storeStems({ parentTrackId, parentName, stems, sampleRate, bpm, durationMs, sourceBounds, audioContext }) {
+      if (!parentTrackId || !stems?.length || !audioContext) return;
+      const stemTypes = ["vocals", "drums", "bass", "other"];
+      const stemTitles = ["VOCALS", "DRUMS", "BASS", "OTHER"];
+      const stemIds = {};
+      for (let i = 0; i < stems.length; i++) {
+        const stem = stems[i];
+        const frames = stem[0].length;
+        const buffer = audioContext.createBuffer(2, frames, sampleRate);
+        buffer.getChannelData(0).set(stem[0]);
+        buffer.getChannelData(1).set(stem[1]);
+        const stemBlob = exporter.toWavBlob(buffer);
+        const stemId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        const stemRecord = {
+          id: stemId,
+          parentId: parentTrackId,
+          stemType: stemTypes[i],
+          isStem: true,
+          name: `${parentName} [${stemTitles[i]}]`,
+          durationMs,
+          tapeDurationMs: durationMs,
+          cropStartMs: 0,
+          cropEndMs: durationMs,
+          sourceStartMs: sourceBounds?.start ?? 0,
+          sourceEndMs: sourceBounds?.end ?? durationMs,
+          editMarks: [],
+          bpm: bpm || null,
+          blob: stemBlob,
+          createdAt: Date.now() + i,
+          updatedAt: Date.now() + i,
+        };
+        await storage.put(stemRecord);
+        stemIds[stemTypes[i]] = stemId;
+      }
+      const parent = await storage.get(parentTrackId);
+      if (parent) {
+        parent.hasStems = true;
+        parent.stemIds = stemIds;
+        parent.updatedAt = Date.now();
+        await storage.put(parent);
+      }
+      this.expandedParentIds.add(parentTrackId);
+      await this.refresh();
+    }
+
+    async replaceStoredStems({ parentTrackId, stems, sampleRate, sourceBounds, audioContext }) {
+      if (!parentTrackId || !stems?.length || !audioContext) return;
+      const records = await storage.getStemsForParent(parentTrackId);
+      if (!records?.length) return;
+      const byType = new Map(records.map((record) => [record.stemType, record]));
+      const stemTypes = ["vocals", "drums", "bass", "other"];
+      for (let index = 0; index < stems.length; index++) {
+        const record = byType.get(stemTypes[index]);
+        if (!record) continue;
+        const channels = stems[index];
+        const frames = channels[0]?.length || 0;
+        if (!frames) continue;
+        const buffer = audioContext.createBuffer(2, frames, sampleRate);
+        buffer.getChannelData(0).set(channels[0]);
+        buffer.getChannelData(1).set(channels[1] || channels[0]);
+        const durationMs = (frames / sampleRate) * 1000;
+        await storage.put({
+          ...record,
+          durationMs,
+          tapeDurationMs: durationMs,
+          cropStartMs: 0,
+          cropEndMs: durationMs,
+          sourceStartMs: sourceBounds.start,
+          sourceEndMs: sourceBounds.end,
+          blob: exporter.toWavBlob(buffer),
+          updatedAt: Date.now(),
+        });
+      }
+      await this.refresh();
     }
   }
 

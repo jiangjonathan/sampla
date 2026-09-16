@@ -31,12 +31,10 @@ const settingsToggle = document.getElementById("settings-toggle");
 const settingsMenu = document.getElementById("settings-menu");
 const liveTab = document.getElementById("live-tab");
 const libraryTab = document.getElementById("library-tab");
+const stemToggle = document.getElementById("stem-toggle");
 const editToggle = document.getElementById("edit-toggle");
 const editToolbar = document.getElementById("edit-toolbar");
 const editRange = document.getElementById("edit-range");
-const editCutBtn = document.getElementById("edit-cut");
-const editCopyBtn = document.getElementById("edit-copy");
-const editPasteBtn = document.getElementById("edit-paste");
 const editLoopToggle = document.getElementById("edit-loop-toggle");
 const editFxToggle = document.getElementById("edit-fx-toggle");
 const editFxMenu = document.getElementById("edit-fx-menu");
@@ -60,6 +58,8 @@ const editLoop1BarBtn = document.getElementById("edit-loop-1bar");
 const editLoop2BarBtn = document.getElementById("edit-loop-2bar");
 const editLoop4BarBtn = document.getElementById("edit-loop-4bar");
 const editLoopAutoBtn = document.getElementById("edit-loop-auto");
+const editLoopPrevBtn = document.getElementById("edit-loop-prev");
+const editLoopNextBtn = document.getElementById("edit-loop-next");
 const editLoopCropBtn = document.getElementById("edit-loop-crop");
 const editLoopAuditionBtn = document.getElementById("edit-loop-audition");
 const BeatDetector = window.SamplaBeatDetector || globalThis.SamplaBeatDetector;
@@ -71,18 +71,12 @@ const isWindowsPlatform = /win/i.test(platformId);
 document.documentElement.dataset.platform = isApplePlatform ? "apple" : isWindowsPlatform ? "windows" : "other";
 
 const editShortcutLabels = {
-  cut: isApplePlatform ? "⌘X" : "Ctrl+X",
-  copy: isApplePlatform ? "⌘C" : "Ctrl+C",
-  paste: isApplePlatform ? "⌘V" : "Ctrl+V",
   delete: isApplePlatform ? "⌫" : "Del",
 };
 editContextMenu.querySelectorAll("[data-shortcut]").forEach((indicator) => {
   indicator.textContent = editShortcutLabels[indicator.dataset.shortcut] || "";
 });
 const commandShortcut = (key) => `${isApplePlatform ? "Meta" : "Control"}+${key}`;
-editCutBtn.setAttribute("aria-keyshortcuts", commandShortcut("X"));
-editCopyBtn.setAttribute("aria-keyshortcuts", commandShortcut("C"));
-editPasteBtn.setAttribute("aria-keyshortcuts", commandShortcut("V"));
 editUndoBtn.setAttribute("aria-keyshortcuts", commandShortcut("Z"));
 editRedoBtn.setAttribute(
   "aria-keyshortcuts",
@@ -91,17 +85,14 @@ editRedoBtn.setAttribute(
 saveBtn.setAttribute("aria-keyshortcuts", commandShortcut("S"));
 for (const button of editContextButtons) {
   const action = button.dataset.editAction;
-  const shortcut = action === "delete" ? "Delete Backspace" : {
-    cut: commandShortcut("X"),
-    copy: commandShortcut("C"),
-    paste: commandShortcut("V"),
-  }[action];
+  const shortcut = action === "delete" ? "Delete Backspace" : null;
   if (shortcut) button.setAttribute("aria-keyshortcuts", shortcut);
 }
 
 // Panel Elements
 const livePanel = document.getElementById("live-panel");
 const libraryPanel = document.getElementById("library-panel");
+const stemLaneControls = document.getElementById("stem-lane-controls");
 const trackNameInput = document.getElementById("track-name");
 const trackDurationEl = document.getElementById("track-duration");
 const trackList = document.getElementById("track-list");
@@ -196,6 +187,9 @@ let sourceRateRampEndsAt = 0;
 let tapeTransportNode = null;
 let tapeTransportBuffer = null;
 let tapeTransportLoad = null;
+let tapeTransportGeneration = 0;
+let resolveTapeTransportLoad = null;
+let playbackRequest = 0;
 let tapeTransportModuleLoad = null;
 
 // Transport & Simulation State
@@ -241,6 +235,16 @@ let lastWaveHoverX = null;
 let cropDragOffsetMs = 0;
 let loopEnabled = false;
 let currentBeatData = null;
+let stemSession = null;
+let stemDerivedTrack = false;
+let trackHasSavedStems = false;
+let stemSplitBusy = false;
+let stemTransition = 0;
+let stemTransitionFrame = 0;
+let stemTransitionToken = 0;
+let stemViewTransitioning = false;
+let stemViewPromise = null;
+let resolveStemView = null;
 let loopSnapEnabled = true;
 let snappedBeatMs = null;
 let scrubRate = 0;
@@ -283,6 +287,11 @@ const libraryController = new window.SamplaLibraryController({
   getAudio,
   isRecording: () => mode === "record",
   onLoadTrack: async (track) => {
+    clearStemSession();
+    // Treat every derived branch as terminal, including records created by
+    // older builds that may not carry the newer stemDerived flag.
+    stemDerivedTrack = Boolean(track.stemDerived || track.isRemix || track.isMix || track.isStem);
+    trackHasSavedStems = Boolean(track.hasStems || (libraryController.savedTracks && libraryController.savedTracks.some((t) => t.parentId === track.id && t.isStem)));
     stopTransport();
     blob = track.blob;
     tapeBuffer = null;
@@ -317,7 +326,7 @@ const libraryController = new window.SamplaLibraryController({
       if (track.isLoop) {
         setLoopMode(true);
       }
-      statusEl.textContent = "tape ready";
+      statusEl.textContent = trackHasSavedStems ? "tape ready · stems available" : "tape ready";
     } else {
       blob = null;
       libraryController.currentTrackId = null;
@@ -336,6 +345,333 @@ const libraryController = new window.SamplaLibraryController({
   onExitEditMode: async () => {
     if (editMode) await setEditMode(false);
   },
+});
+
+function stemMixChannels(useEnabled = true) {
+  if (!stemSession?.stems?.length) return null;
+  const frames = stemSession.stems[0][0].length;
+  const channels = [new Float32Array(frames), new Float32Array(frames)];
+  for (let stem = 0; stem < stemSession.stems.length; stem++) {
+    if (useEnabled && !stemSession.enabled[stem]) continue;
+    for (let channel = 0; channel < 2; channel++) {
+      const input = stemSession.stems[stem][channel];
+      for (let i = 0; i < frames; i++) channels[channel][i] += input[i];
+    }
+  }
+  return channels;
+}
+
+function applyStemMix() {
+  const channels = stemMixChannels(stemSession?.viewingStems);
+  if (!channels) return;
+  const resumePlayback = mode === "play";
+  const ctx = getAudio();
+  const raw = ctx.createBuffer(2, channels[0].length, stemSession.sampleRate);
+  channels.forEach((channel, index) => raw.getChannelData(index).set(channel));
+  const resampled = BufferOps.adaptBufferFormat(raw, 2, ctx.sampleRate, ctx);
+  const original = stemSession.originalBuffer;
+  const offset = Math.round(stemSession.sourceBounds.start * ctx.sampleRate / 1000);
+  // The parent tape owns the timeline. Stale or legacy stem metadata must
+  // never be able to grow it and reveal audio that was destructively cropped.
+  const mixed = ctx.createBuffer(2, original.length, ctx.sampleRate);
+  for (let channel = 0; channel < 2; channel++) {
+    const output = mixed.getChannelData(channel);
+    output.set(original.getChannelData(Math.min(channel, original.numberOfChannels - 1)));
+    if (offset < output.length) {
+      const targetOffset = Math.max(0, offset);
+      const sourceOffset = Math.max(0, -offset);
+      output.set(
+        resampled.getChannelData(channel).subarray(sourceOffset, sourceOffset + output.length - targetOffset),
+        targetOffset,
+      );
+    }
+  }
+  const nextBuffer = stemSession.viewingStems ? mixed : original;
+  const canReplaceLive = resumePlayback && source === tapeTransportNode &&
+    tapeTransportNode && tapeTransportBuffer === tapeBuffer;
+  if (!canReplaceLive) stopTransport();
+  tapeBuffer = nextBuffer;
+  tapeBufferRev = null;
+  if (canReplaceLive) {
+    const transportChannels = Array.from(
+      { length: tapeBuffer.numberOfChannels },
+      (_, channel) => tapeBuffer.getChannelData(channel).slice()
+    );
+    tapeTransportNode.port.postMessage(
+      { type: "replace", channels: transportChannels },
+      transportChannels.map((channel) => channel.buffer),
+    );
+    tapeTransportBuffer = tapeBuffer;
+  } else {
+    dropTapeTransport();
+  }
+  decodeWait = null;
+  blob = stemSession.viewingStems ? recordingExporter.toWavBlob(mixed) : stemSession.originalBlob;
+  tapeEndMs = tapeBuffer.duration * 1000;
+  playheadMs = Math.min(playheadMs, tapeEndMs);
+  wavePeaks = stemSession.originalPeaks;
+  showTime(playheadMs);
+  syncTransport();
+  if (resumePlayback && !canReplaceLive) requestAnimationFrame(() => playTape());
+}
+
+function renderStemControls() {
+  if (!stemSession) {
+    stemLaneControls.hidden = true;
+    stemLaneControls.replaceChildren();
+    return;
+  }
+  const names = ["VOCALS", "DRUMS", "BASS", "OTHER"];
+  stemLaneControls.replaceChildren(...names.map((name, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const label = document.createElement("span");
+    label.textContent = name;
+    button.appendChild(label);
+    button.setAttribute("aria-pressed", String(stemSession.enabled[index]));
+    button.setAttribute("aria-label", `${name} stem ${stemSession.enabled[index] ? "on" : "off"}`);
+    button.addEventListener("click", () => {
+      if (stemViewTransitioning) return;
+      stemSession.enabled[index] = !stemSession.enabled[index];
+      button.setAttribute("aria-pressed", String(stemSession.enabled[index]));
+      button.setAttribute("aria-label", `${name} stem ${stemSession.enabled[index] ? "on" : "off"}`);
+      applyStemMix();
+      waveCanvas._lastRenderKey = null;
+      drawWave(playheadMs);
+    });
+    return button;
+  }));
+  stemLaneControls.hidden = !stemSession.viewingStems;
+  stemLaneControls.style.opacity = String(stemTransition);
+}
+
+function animateStemView(showStems, durationMs = 440) {
+  if (stemViewTransitioning) return stemViewPromise?.then(() => animateStemView(showStems, durationMs));
+  if (!stemSession || stemSession.viewingStems === showStems) return;
+  const token = ++stemTransitionToken;
+  cancelAnimationFrame(stemTransitionFrame);
+  stemViewTransitioning = true;
+  const started = performance.now();
+  const from = stemTransition;
+  const to = showStems ? 1 : 0;
+  stemSession.viewingStems = showStems;
+  stemLaneControls.hidden = false;
+  syncTransport();
+
+  const animDuration = Math.max(1, durationMs);
+  stemViewPromise = new Promise((resolve) => {
+    resolveStemView = resolve;
+    const step = (now) => {
+      if (token !== stemTransitionToken) { resolve(); return; }
+      const elapsed = Math.min(1, (now - started) / animDuration);
+      const eased = elapsed < 0.5
+        ? 4 * elapsed ** 3
+        : 1 - ((-2 * elapsed + 2) ** 3) / 2;
+      stemTransition = from + (to - from) * eased;
+      stemLaneControls.style.opacity = String(stemTransition);
+      waveCanvas._lastRenderKey = null;
+      sizeWave();
+      drawWave(playheadMs);
+      if (elapsed < 1) {
+        stemTransitionFrame = requestAnimationFrame(step);
+        return;
+      }
+
+      // Let the completed morph paint before rebuilding the audible stem mix.
+      stemTransitionFrame = requestAnimationFrame(() => {
+        if (token !== stemTransitionToken) { resolve(); return; }
+        applyStemMix();
+        stemViewTransitioning = false;
+        renderStemControls();
+        syncTransport();
+        resolve();
+      });
+    };
+    stemTransitionFrame = requestAnimationFrame(step);
+  });
+  return stemViewPromise;
+}
+
+function clearStemSession() {
+
+  resolveStemView?.();
+  resolveStemView = null;
+  stemTransitionToken++;
+  cancelAnimationFrame(stemTransitionFrame);
+  stemViewTransitioning = false;
+  stemSession = null;
+  stemTransition = 0;
+  renderStemControls();
+  waveCanvas._lastRenderKey = null;
+}
+
+async function restoreSavedStems(trackId) {
+  if (!trackId) return false;
+  try {
+    const stemRecords = await recordingStorage.getStemsForParent(trackId);
+    if (!stemRecords || stemRecords.length !== 4) return false;
+    const stemOrder = { vocals: 0, drums: 1, bass: 2, other: 3 };
+    stemRecords.sort((a, b) => (stemOrder[a.stemType] ?? 0) - (stemOrder[b.stemType] ?? 0));
+    statusEl.textContent = "loading stems…";
+    const ctx = getAudio();
+    const stemBuffers = await Promise.all(
+      stemRecords.map(async (rec) => {
+        const arrayBuffer = await rec.blob.arrayBuffer();
+        return await ctx.decodeAudioData(arrayBuffer);
+      })
+    );
+    const stemChannels = stemBuffers.map((buf) => [
+      buf.getChannelData(0).slice(),
+      buf.getChannelData(buf.numberOfChannels > 1 ? 1 : 0).slice()
+    ]);
+    const originalBuffer = tapeBuffer || await ctx.decodeAudioData(await blob.arrayBuffer());
+    const originalPeaks = wavePeaks.length
+      ? wavePeaks
+      : BufferOps.peaksFromBuffer(originalBuffer, WAVE_BIN_MS);
+    stemSession = {
+      sourceId: trackId,
+      originalBuffer,
+      originalBlob: blob,
+      originalPeaks,
+      sourceBounds: {
+        start: stemRecords[0].sourceStartMs ?? cropBounds().start,
+        end: stemRecords[0].sourceEndMs ?? (cropBounds().start + stemBuffers[0].duration * 1000),
+      },
+      stems: stemChannels,
+      gain: 1,
+      sampleRate: stemBuffers[0].sampleRate,
+      enabled: [true, true, true, true],
+      peaks: stemBuffers.map((buf) => BufferOps.peaksFromBuffer(buf, WAVE_BIN_MS)),
+      viewingStems: false,
+    };
+    stemTransition = 0;
+    renderStemControls();
+    await animateStemView(true);
+    statusEl.textContent = "stems ready · tap lane names to mute or restore";
+    syncTransport();
+    return true;
+  } catch (err) {
+    console.error("Failed to restore saved stems", err);
+    statusEl.textContent = "could not load stems";
+    return false;
+  }
+}
+
+// The library and deck both use the same event. Intercept repeat requests for
+// the active source before the worker controller sees them: once stems exist,
+// this action is navigation only and must never invoke separation again.
+window.addEventListener("sampla:open-stems", async (event) => {
+  const requestedId = event.detail?.source?.id || event.detail?.id || null;
+  const alreadySplit = stemSession && (!requestedId || requestedId === stemSession.sourceId);
+  if (alreadySplit) {
+    event.stopImmediatePropagation();
+    setScreenView("live");
+    if (!stemSession.viewingStems) animateStemView(true);
+    return;
+  }
+  if (requestedId && (trackHasSavedStems || (libraryController.savedTracks && libraryController.savedTracks.some((t) => t.parentId === requestedId && t.isStem)))) {
+    event.stopImmediatePropagation();
+    setScreenView("live");
+    await restoreSavedStems(requestedId);
+    return;
+  }
+  if (stemSplitBusy) {
+    event.stopImmediatePropagation();
+  }
+});
+
+window.addEventListener("sampla:stem-split-start", () => {
+  stemSplitBusy = true;
+  livePanel.hidden = false;
+  libraryPanel.hidden = true;
+  syncTransport();
+});
+
+window.addEventListener("sampla:stem-split-stopped", ({ detail }) => {
+  stemSplitBusy = false;
+  statusEl.textContent = detail?.message || "stem split stopped";
+  syncTransport();
+});
+
+window.addEventListener("sampla:stems-ready", async ({ detail }) => {
+  // The split is made from the active tape. Keep that tape and its transport
+  // running until the completed stem mix is ready to be swapped in.
+  const originalBuffer = tapeBuffer || await getAudio().decodeAudioData(await detail.source.blob.arrayBuffer());
+  const originalPeaks = wavePeaks.length
+    ? wavePeaks
+    : BufferOps.peaksFromBuffer(originalBuffer, WAVE_BIN_MS);
+  stemSplitBusy = false;
+  stemSession = {
+    sourceId: detail.source?.id || null,
+    originalBuffer,
+    originalBlob: detail.source.blob,
+    originalPeaks,
+    sourceBounds: {
+      start: 0,
+      end: originalBuffer.duration * 1000,
+    },
+    stems: detail.stems,
+    gain: detail.gain,
+    sampleRate: detail.sampleRate,
+    enabled: detail.stems.map(() => true),
+    peaks: detail.stems.map((stem) => BufferOps.peaksFromChannels
+      ? BufferOps.peaksFromChannels(stem, detail.sampleRate, WAVE_BIN_MS)
+      : []),
+    viewingStems: false,
+  };
+  // peaksFromChannels is optional; build lightweight AudioBuffers as fallback.
+  if (stemSession.peaks.some((peaks) => !peaks.length)) {
+    stemSession.peaks = detail.stems.map((stem) => {
+      const buffer = getAudio().createBuffer(2, stem[0].length, detail.sampleRate);
+      buffer.getChannelData(0).set(stem[0]);
+      buffer.getChannelData(1).set(stem[1]);
+      return BufferOps.peaksFromBuffer(buffer, WAVE_BIN_MS);
+    });
+  }
+  stemTransition = 0;
+  renderStemControls();
+  animateStemView(true);
+  statusEl.textContent = "stems ready · tap lane names to mute or restore";
+
+  // Auto-persist stems to IndexedDB
+  try {
+    let parentId = libraryController.currentTrackId || detail.source?.id;
+    const parentName = trackNameInput.value.trim() || detail.source?.name || libraryController.nextTrackName();
+    if (!libraryController.currentTrackId) {
+      parentId = parentId || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+      libraryController.currentTrackId = parentId;
+      trackNameInput.value = parentName;
+      await recordingStorage.put({
+        id: parentId,
+        name: parentName,
+        durationMs: originalBuffer.duration * 1000,
+        tapeDurationMs: originalBuffer.duration * 1000,
+        cropStartMs: cropStartMs || 0,
+        cropEndMs: cropEndMs || originalBuffer.duration * 1000,
+        editMarks: [],
+        bpm: currentBeatData?.bpm || null,
+        blob: detail.source.blob,
+        hasStems: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+    stemSession.sourceId = parentId;
+    trackHasSavedStems = true;
+    await libraryController.storeStems({
+      parentTrackId: parentId,
+      parentName,
+      stems: detail.stems,
+      sampleRate: detail.sampleRate,
+      bpm: currentBeatData?.bpm || null,
+      durationMs: Math.round((detail.stems[0][0].length / detail.sampleRate) * 1000),
+      sourceBounds: stemSession.sourceBounds,
+      audioContext: getAudio(),
+    });
+    syncTransport();
+  } catch (persistErr) {
+    console.error("Auto-persist stems failed", persistErr);
+  }
 });
 
 // Physics & Rate Mappings
@@ -373,6 +709,28 @@ function transportBounds() {
   return cropBounds();
 }
 
+function syncActiveTransportBounds({ restartFallback = false, seekToPlayhead = false } = {}) {
+  if (mode !== "play" || !source || !tapeBuffer) return;
+  const bounds = transportBounds();
+  if (source === tapeTransportNode) {
+    tapeTransportNode.port.postMessage({
+      type: "set-bounds",
+      startFrame: (bounds.start / 1000) * tapeBuffer.sampleRate,
+      endFrame: (bounds.end / 1000) * tapeBuffer.sampleRate,
+      loop: loopEnabled,
+      ...(seekToPlayhead ? { position: (playheadMs / 1000) * tapeBuffer.sampleRate } : {}),
+    });
+    return;
+  }
+  if (!restartFallback) return;
+  const nextPlayheadMs = seekToPlayhead ? playheadMs : livePlayheadMs();
+  playheadMs = Math.max(bounds.start, Math.min(bounds.end - 1, nextPlayheadMs));
+  if (!playSource(1, { immediateTransition: true })) {
+    playheadMs = bounds.start;
+    playSource(1, { immediateTransition: true });
+  }
+}
+
 // Waveform & Deck Visual Wrappers
 function sizeWave() {
   WaveformView.sizeWave(waveCanvas);
@@ -396,6 +754,10 @@ function editHandleAt(clientX) {
 
 function drawWave(ms) {
   WaveformView.drawWave(waveCanvas, waveCtx, {
+    stemLanes: stemSession && (stemSession.viewingStems || stemTransition > 0)
+      ? stemSession.peaks.map((peaks, index) => ({ peaks, enabled: stemSession.enabled[index], offsetMs: stemSession.sourceBounds.start }))
+      : null,
+    stemTransition,
     ms,
     waveWindowMs,
     wavePeaks,
@@ -415,6 +777,7 @@ function drawWave(ms) {
       showBeats: editMode && Boolean(currentBeatData),
       beats: currentBeatData?.beats || [],
       bars: currentBeatData?.bars || [],
+      transients: [],
       snappedBeatMs,
     },
   });
@@ -476,9 +839,6 @@ function sampleRecordPeak(ms) {
 function syncEditControls() {
   const selection = editSelectionBounds();
   const selected = Boolean(selection);
-  editCutBtn.disabled = !selected;
-  editCopyBtn.disabled = !selected;
-  editPasteBtn.disabled = !editClipboard;
   editFxToggle.disabled = !selected;
   editReverseBtn.disabled = !selected;
   if (editSpeedInput && editSpeedCell) {
@@ -505,7 +865,11 @@ function syncEditControls() {
   const gainLabel = gain === "mixed" || Math.abs(gain) < 0.0001
     ? (gain === "mixed" ? " · MIX" : "")
     : ` · ${gain > 0 ? "+" : ""}${Math.round(gain)}DB`;
-  editRange.textContent = `${Geometry.formatEditTime(selection.start)}—${Geometry.formatEditTime(selection.end)}${gainLabel}`;
+  const musicalSpan = currentBeatData && BeatDetector?.formatMusicalLength
+    ? BeatDetector.formatMusicalLength(selection.end - selection.start, currentBeatData.beatIntervalMs)
+    : "";
+  const musicalLabel = musicalSpan ? ` · ${musicalSpan}` : "";
+  editRange.textContent = `${Geometry.formatEditTime(selection.start)}—${Geometry.formatEditTime(selection.end)}${musicalLabel}${gainLabel}`;
 }
 
 function editStatusText(ms) {
@@ -569,6 +933,7 @@ function updateCrop(clientX) {
     cropEndMs = Math.min(limit, Math.max(requested, cropStartMs + CROP_MIN_MS));
   }
   const bounds = cropBounds();
+  syncActiveTransportBounds();
   statusEl.textContent = `crop ${Geometry.formatTime(bounds.start)} to ${Geometry.formatTime(bounds.end)}`;
   showTime(playheadMs);
   drawWave(playheadMs);
@@ -587,12 +952,14 @@ function captureEditState() {
 }
 
 function pushEditHistory() {
+  clearStemSession();
   editHistory.push(captureEditState());
   if (editHistory.length > 10) editHistory.shift();
   editRedo.length = 0;
 }
 
 function restoreEditState(state, message) {
+  clearStemSession();
   stopTransport();
   tapeBuffer = state.buffer;
   tapeBufferRev = null;
@@ -608,6 +975,10 @@ function restoreEditState(state, message) {
   editStartMs = null;
   editEndMs = null;
   wavePeaks = BufferOps.peaksFromBuffer(tapeBuffer, WAVE_BIN_MS);
+  updateBeatAnalysis(tapeBuffer);
+  revealEditPlayhead();
+  editViewCenterMs = Math.max(0, Math.min(tapeEndMs, editViewCenterMs));
+  waveCanvas._lastRenderKey = null;
   showTime(playheadMs);
   syncEditControls();
   syncTransport();
@@ -684,6 +1055,11 @@ function commitBufferEdit(operation, amount = 1) {
   }
   playheadMs = Math.max(0, Math.min(tapeEndMs, playheadMs));
   wavePeaks = BufferOps.peaksFromBuffer(next, WAVE_BIN_MS);
+  clearStemSession();
+  updateBeatAnalysis(next);
+  revealEditPlayhead();
+  editViewCenterMs = Math.max(0, Math.min(tapeEndMs, editViewCenterMs));
+  waveCanvas._lastRenderKey = null;
   showTime(playheadMs);
   syncEditControls();
   syncTransport();
@@ -726,6 +1102,11 @@ function commitAudioReplacement(startMs, endMs, replacement, type, customMessage
   editStartMs = actualStartMs;
   editEndMs = actualStartMs + insertedMs;
   wavePeaks = BufferOps.peaksFromBuffer(next, WAVE_BIN_MS);
+  clearStemSession();
+  updateBeatAnalysis(next);
+  revealEditPlayhead();
+  editViewCenterMs = Math.max(0, Math.min(tapeEndMs, editViewCenterMs));
+  waveCanvas._lastRenderKey = null;
   showTime(playheadMs);
   syncEditControls();
   syncTransport();
@@ -813,6 +1194,59 @@ function cropTrackHard(startMs, endMs) {
 
   pushEditHistory();
   const next = BufferOps.copyBufferRange(tapeBuffer, startFrame, endFrame, getAudio());
+  const croppedStemSession = stemSession;
+  if (croppedStemSession?.stems?.length) {
+    const actualStartMs = (startFrame / sampleRate) * 1000;
+    const actualEndMs = (endFrame / sampleRate) * 1000;
+    const sourceStart = croppedStemSession.sourceBounds.start;
+    const sourceEnd = croppedStemSession.sourceBounds.end;
+    const keptStart = Math.max(actualStartMs, sourceStart);
+    const keptEnd = Math.min(actualEndMs, sourceEnd);
+    if (keptEnd > keptStart) {
+      const stemStartFrame = Math.max(0, Math.floor(
+        ((keptStart - sourceStart) / 1000) * croppedStemSession.sampleRate
+      ));
+      const stemEndFrame = Math.min(croppedStemSession.stems[0][0].length, Math.ceil(
+        ((keptEnd - sourceStart) / 1000) * croppedStemSession.sampleRate
+      ));
+      croppedStemSession.stems = croppedStemSession.stems.map((channels) => channels.map(
+        (channel) => channel.slice(stemStartFrame, stemEndFrame)
+      ));
+      croppedStemSession.sourceBounds = {
+        start: keptStart - actualStartMs,
+        end: keptEnd - actualStartMs,
+      };
+      const original = croppedStemSession.originalBuffer;
+      const originalStartFrame = Math.max(0, Math.floor((actualStartMs / 1000) * original.sampleRate));
+      const originalEndFrame = Math.min(original.length, Math.ceil((actualEndMs / 1000) * original.sampleRate));
+      croppedStemSession.originalBuffer = BufferOps.copyBufferRange(
+        original,
+        originalStartFrame,
+        originalEndFrame,
+        getAudio(),
+      );
+      croppedStemSession.originalBlob = recordingExporter.toWavBlob(croppedStemSession.originalBuffer);
+      croppedStemSession.originalPeaks = BufferOps.peaksFromBuffer(croppedStemSession.originalBuffer, WAVE_BIN_MS);
+      croppedStemSession.peaks = croppedStemSession.stems.map((channels) => {
+        if (BufferOps.peaksFromChannels) {
+          return BufferOps.peaksFromChannels(channels, croppedStemSession.sampleRate, WAVE_BIN_MS);
+        }
+        const buffer = getAudio().createBuffer(2, channels[0].length, croppedStemSession.sampleRate);
+        buffer.getChannelData(0).set(channels[0]);
+        buffer.getChannelData(1).set(channels[1] || channels[0]);
+        return BufferOps.peaksFromBuffer(buffer, WAVE_BIN_MS);
+      });
+      libraryController.replaceStoredStems({
+        parentTrackId: croppedStemSession.sourceId,
+        stems: croppedStemSession.stems,
+        sampleRate: croppedStemSession.sampleRate,
+        sourceBounds: croppedStemSession.sourceBounds,
+        audioContext: getAudio(),
+      }).catch((error) => console.error("Failed to crop stored stems", error));
+    } else {
+      clearStemSession();
+    }
+  }
   stopTransport();
   tapeBuffer = next;
   tapeBufferRev = null;
@@ -823,8 +1257,10 @@ function cropTrackHard(startMs, endMs) {
   cropStartMs = 0;
   cropEndMs = tapeEndMs;
   playheadMs = 0;
-  wavePeaks = BufferOps.peaksFromBuffer(next, WAVE_BIN_MS);
+  editViewCenterMs = 0;
+  wavePeaks = stemSession?.originalPeaks || BufferOps.peaksFromBuffer(next, WAVE_BIN_MS);
   updateBeatAnalysis(next);
+  waveCanvas._lastRenderKey = null;
 
   const removedStartMs = (startFrame / sampleRate) * 1000;
   const newDurationMs = tapeEndMs;
@@ -851,8 +1287,12 @@ function cropTrackHard(startMs, endMs) {
 function applyAutoTrimQuiet(buffer) {
   const next = BufferOps.quietEdgeBounds(buffer, WAVE_BIN_MS, CROP_MIN_MS);
   if (next.end > next.start && (next.start > 0 || next.end < buffer.duration * 1000 - 8)) {
-    cropTrackHard(next.start, next.end);
-    statusEl.textContent = "quiet ends trimmed";
+    cropStartMs = next.start;
+    cropEndMs = next.end;
+    playheadMs = next.start;
+    syncActiveTransportBounds({ restartFallback: true, seekToPlayhead: true });
+    showTime(playheadMs);
+    statusEl.textContent = "quiet ends cropped · store to apply";
   } else {
     cropStartMs = 0;
     cropEndMs = tapeLimit();
@@ -876,6 +1316,8 @@ function updateEditLoopMenu() {
   if (editLoop2BarBtn) editLoop2BarBtn.disabled = disabled;
   if (editLoop4BarBtn) editLoop4BarBtn.disabled = disabled;
   if (editLoopAutoBtn) editLoopAutoBtn.disabled = disabled;
+  if (editLoopPrevBtn) editLoopPrevBtn.disabled = !hasTape;
+  if (editLoopNextBtn) editLoopNextBtn.disabled = !hasTape;
   const selection = editSelectionBounds();
   if (editLoopCropBtn) editLoopCropBtn.disabled = !selection;
   if (editLoopAuditionBtn) {
@@ -949,25 +1391,90 @@ function applyEditBarPreset(barCount) {
   editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.start, 10);
   editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.end, 10);
   playheadMs = editStartMs;
+  syncActiveTransportBounds({ restartFallback: true, seekToPlayhead: true });
   syncEditControls();
   showTime(playheadMs);
   drawWave(playheadMs);
   statusEl.textContent = `${barCount} ${barCount === 1 ? "bar" : "bars"} loop (${currentBeatData.bpm.toFixed(1)} BPM)`;
 }
 
+let autoLoopCandidateIndex = 0;
+
 function applyEditAutoLoop() {
   if (!tapeBuffer || !BeatDetector) return;
   if (!currentBeatData) updateBeatAnalysis(tapeBuffer);
   if (!currentBeatData) return;
 
-  const loop = BeatDetector.autoDetectLoop(currentBeatData, tapeLimit(), 2);
+  const loop = BeatDetector.autoDetectLoop(currentBeatData, tapeLimit(), 2, autoLoopCandidateIndex);
+  autoLoopCandidateIndex += 1;
   editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.start, 10);
   editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, loop.end, 10);
   playheadMs = editStartMs;
+  syncActiveTransportBounds({ restartFallback: true, seekToPlayhead: true });
   syncEditControls();
   showTime(playheadMs);
   drawWave(playheadMs);
   statusEl.textContent = `auto-loop: ${loop.barCount} bars (${currentBeatData.bpm.toFixed(1)} BPM)`;
+}
+
+function nudgeEditLoop(direction, stepMultiplier = 1) {
+  if (!tapeBuffer || !BeatDetector) return;
+  if (!currentBeatData) updateBeatAnalysis(tapeBuffer);
+  if (!currentBeatData) return;
+
+  const duration = tapeLimit();
+  const beatIntervalMs = currentBeatData.beatIntervalMs || 500;
+  const stepMs = beatIntervalMs * stepMultiplier;
+  const selection = editSelectionBounds();
+
+  if (!selection) {
+    const start = BeatDetector.findPrevBeat(playheadMs, currentBeatData.beats || []);
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, start, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, start + beatIntervalMs * 4, 10);
+  } else {
+    const span = selection.end - selection.start;
+    let newStart = selection.start + direction * stepMs;
+    let newEnd = newStart + span;
+
+    if (newStart < 0) {
+      newStart = 0;
+      newEnd = Math.min(duration, span);
+    } else if (newEnd > duration) {
+      newEnd = duration;
+      newStart = Math.max(0, duration - span);
+    }
+
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, newStart, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, newEnd, 10);
+  }
+
+  playheadMs = editStartMs;
+  syncActiveTransportBounds({ restartFallback: true, seekToPlayhead: true });
+  syncEditControls();
+  showTime(playheadMs);
+  drawWave(playheadMs);
+  statusEl.textContent = `loop shifted ${direction < 0 ? "earlier" : "later"}`;
+}
+
+function seekToBeat(direction, wholeBar = false) {
+  if (!blob || mode === "record") return;
+  if (mode !== "idle") stopTransport();
+  if (!currentBeatData && tapeBuffer && BeatDetector) updateBeatAnalysis(tapeBuffer);
+  const targets = wholeBar && currentBeatData?.bars?.length
+    ? currentBeatData.bars
+    : currentBeatData?.beats;
+
+  if (!targets || !targets.length) {
+    seekFromKeyboard(playheadMs + direction * 500);
+    return;
+  }
+
+  const targetMs = direction < 0
+    ? BeatDetector.findPrevBeat(playheadMs, targets)
+    : BeatDetector.findNextBeat(playheadMs, targets);
+
+  seekFromKeyboard(targetMs);
+  statusEl.textContent = `beat: ${Geometry.formatTime(targetMs)}`;
 }
 
 function applyEditLoopCrop() {
@@ -1076,11 +1583,20 @@ function animateEditModeUI(active, headRatio = 0.5) {
 }
 
 async function setEditMode(active) {
+  let stemCollapse = null;
   if (active) {
     if (!blob || mode === "record") return;
+    if (stemSession?.viewingStems) {
+      // Treat stem -> Edit as one continuous handoff. The regular Edit
+      // transition starts halfway through the ordinary stem collapse, so its
+      // 220ms layout motion is unchanged and both animations land together.
+      stemCollapse = animateStemView(false);
+      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (!reducedMotion) await new Promise((resolve) => setTimeout(resolve, 220));
+    }
     const buffer = await ensureDecoded();
     if (!buffer || !blob) return;
-    if (!currentBeatData) updateBeatAnalysis(buffer);
+    if (!currentBeatData && typeof updateBeatAnalysis === "function") updateBeatAnalysis(typeof tapeBuffer !== "undefined" && tapeBuffer ? tapeBuffer : buffer);
   }
   const transitionHeadRatio = !active && editMode
     ? 0.5 + (playheadMs - editViewCenterMs) / waveWindowMs
@@ -1096,6 +1612,7 @@ async function setEditMode(active) {
   editHandle = null;
   hoveredEditHandle = null;
   waveCanvas.classList.remove("edit-handle-hover");
+  syncActiveTransportBounds({ restartFallback: true });
   animateEditModeUI(editMode, transitionHeadRatio);
   editToggle.classList.toggle("active", editMode);
   editToggle.setAttribute("aria-pressed", String(editMode));
@@ -1111,6 +1628,9 @@ async function setEditMode(active) {
     drawWave(playheadMs);
   });
   statusEl.textContent = editMode ? "splice mode" : "tape ready";
+  if (stemCollapse) {
+    await stemCollapse;
+  }
 }
 
 async function finishEdits() {
@@ -1127,6 +1647,7 @@ async function finishEdits() {
     editMarks,
     bpm: currentBeatData?.bpm || null,
     isLoop: loopEnabled,
+    stemDerived: stemDerivedTrack,
   });
   await setEditMode(false);
   statusEl.textContent = "edits applied";
@@ -1355,6 +1876,7 @@ function haltWind() {
 }
 
 function stopTransport({ keepPlayhead = false, coastPlaybackArm = false } = {}) {
+  playbackRequest++;
   const wasJogging = jogActive;
   resetJogState();
   stopSource({ keepPlayhead: keepPlayhead || wasJogging });
@@ -1376,13 +1898,17 @@ function getAudio() {
 }
 
 function dropTapeTransport() {
-  if (tapeTransportNode) {
-    try {
-      tapeTransportNode.port.onmessage = null;
-      tapeTransportNode.disconnect();
-    } catch {}
+  tapeTransportGeneration++;
+  resolveTapeTransportLoad?.();
+  resolveTapeTransportLoad = null;
+  const oldNode = tapeTransportNode;
+  if (oldNode) {
+    oldNode.port.onmessage = null;
+    oldNode.port.postMessage({ type: "dispose", fadeFrames: Math.round((audioCtx?.sampleRate || 48000) * SCRUB_FADE_SEC) });
+    // Let the audio thread fade out before releasing the graph and message port.
+    setTimeout(() => { oldNode.disconnect(); oldNode.port.close(); }, 40);
   }
-  if (source === tapeTransportNode) {
+  if (source === oldNode) {
     source = null;
     sourceGain = null;
   }
@@ -1393,10 +1919,7 @@ function dropTapeTransport() {
 
 async function ensureTapeTransport(buffer) {
   if (!buffer) return null;
-  if (tapeTransportNode && tapeTransportBuffer === buffer) {
-    await tapeTransportLoad;
-    return tapeTransportNode;
-  }
+  if (tapeTransportBuffer === buffer && tapeTransportLoad) return tapeTransportLoad;
   dropTapeTransport();
   const ctx = getAudio();
   if (!tapeTransportModuleLoad) {
@@ -1408,47 +1931,54 @@ async function ensureTapeTransport(buffer) {
       throw error;
     });
   }
-  await tapeTransportModuleLoad;
-  const node = new AudioWorkletNode(ctx, "tape-transport-processor", {
-    numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [buffer.numberOfChannels],
-  });
-  node.connect(ctx.destination);
-  tapeTransportNode = node;
+  const generation = tapeTransportGeneration;
   tapeTransportBuffer = buffer;
-  tapeTransportLoad = new Promise((resolve) => {
-    node.port.onmessage = (event) => {
-      if (tapeTransportNode !== node) return;
-      const message = event.data || {};
-      if (message.type === "loaded") {
-        resolve();
-        return;
-      }
-      if (message.type === "scrub-boundary" && source === node && jogActive) {
+  tapeTransportLoad = (async () => {
+    await tapeTransportModuleLoad;
+    if (generation !== tapeTransportGeneration) return null;
+    const node = new AudioWorkletNode(ctx, "tape-transport-processor", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [buffer.numberOfChannels],
+    });
+    node.connect(ctx.destination);
+    tapeTransportNode = node;
+    tapeTransportBuffer = buffer;
+    const loaded = new Promise((resolve) => {
+      resolveTapeTransportLoad = resolve;
+      node.port.onmessage = (event) => {
+        if (tapeTransportNode !== node) return;
+        const message = event.data || {};
+        if (message.type === "loaded") {
+          resolve();
+          return;
+        }
+        if (message.type === "scrub-boundary" && source === node && jogActive) {
+          acceptTapeTransportReport(message, ctx, node);
+          finishScrubAtBoundary(message.edge);
+          return;
+        }
         acceptTapeTransportReport(message, ctx, node);
-        finishScrubAtBoundary(message.edge);
-        return;
-      }
-      acceptTapeTransportReport(message, ctx, node);
-      if (message.type === "ended" && source === node) {
-        playheadMs = Math.max(
-          0,
-          Math.min(tapeLimit(), (message.position / ctx.sampleRate) * 1000)
-        );
-        source = null;
-        sourceGain = null;
-        haltWind();
-      }
-    };
-  });
-  const channels = Array.from(
-    { length: buffer.numberOfChannels },
-    (_, channel) => buffer.getChannelData(channel).slice()
-  );
-  node.port.postMessage({ type: "load", channels }, channels.map((channel) => channel.buffer));
-  await tapeTransportLoad;
-  return node;
+        if (message.type === "ended" && source === node) {
+          playheadMs = Math.max(
+            0,
+            Math.min(tapeLimit(), (message.position / ctx.sampleRate) * 1000)
+          );
+          source = null;
+          sourceGain = null;
+          haltWind();
+        }
+      };
+    });
+    const channels = Array.from(
+      { length: buffer.numberOfChannels },
+      (_, channel) => buffer.getChannelData(channel).slice()
+    );
+    node.port.postMessage({ type: "load", channels }, channels.map((channel) => channel.buffer));
+    await loaded;
+    return generation === tapeTransportGeneration ? node : null;
+  })();
+  return tapeTransportLoad;
 }
 
 function stopSource(opts = {}) {
@@ -1495,7 +2025,7 @@ function stopSource(opts = {}) {
 }
 
 function playSource(rate, options = {}) {
-  stopSource({ keepPlayhead: true, immediate: options.immediateTransition });
+  stopSource({ keepPlayhead: true });
   if (!tapeBuffer || !rate) return false;
   const ctx = getAudio();
   const duration = tapeBuffer.duration;
@@ -1505,9 +2035,7 @@ function playSource(rate, options = {}) {
   if (rate < 0 && offset <= bounds.start / 1000) return false;
   if (rate > 0 && offset >= bounds.end / 1000) return false;
   if (tapeTransportNode && tapeTransportBuffer === tapeBuffer) {
-    const fadeFrames = options.immediateTransition
-      ? 1
-      : Math.max(1, Math.round(ctx.sampleRate * SCRUB_FADE_SEC));
+    const fadeFrames = Math.max(1, Math.round(ctx.sampleRate * SCRUB_FADE_SEC));
     sourceOffset = offset;
     sourceRateStart = rate;
     sourceRate = rate;
@@ -1532,12 +2060,8 @@ function playSource(rate, options = {}) {
   const gain = ctx.createGain();
   src.buffer = reverse ? tapeBufferRev : tapeBuffer;
   src.playbackRate.value = Math.abs(rate);
-  if (options.immediateTransition) {
-    gain.gain.setValueAtTime(1, ctx.currentTime);
-  } else {
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(1, ctx.currentTime + SCRUB_FADE_SEC);
-  }
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(1, ctx.currentTime + SCRUB_FADE_SEC);
   src.connect(gain);
   gain.connect(ctx.destination);
   sourceOffset = offset;
@@ -1571,7 +2095,9 @@ function playSource(rate, options = {}) {
     haltWind();
   };
   const startAt = reverse ? Math.max(0, duration - offset) : offset;
-  const span = reverse ? offset : duration - offset;
+  const span = reverse
+    ? offset - bounds.start / 1000
+    : bounds.end / 1000 - offset;
   if (span <= 0) {
     source = null;
     sourceGain = null;
@@ -1635,6 +2161,25 @@ function syncTransport() {
   loopBtn.disabled = recording || !hasTape;
   saveBtn.disabled = !hasTape;
   editToggle.disabled = recording || !hasTape;
+  if (stemToggle) {
+    const bounds = hasTape ? cropBounds() : { start: 0, end: 0 };
+    const stemEligible = hasTape && tapeLimit() > 0 && tapeLimit() <= 30000;
+    const canNavigateToStems = Boolean(stemSession || trackHasSavedStems);
+    const stemPending = stemSplitBusy || stemViewTransitioning;
+    const viewingStems = Boolean(stemSession?.viewingStems);
+    stemToggle.disabled = recording || (stemDerivedTrack && !stemSession) || stemPending || (!stemEligible && !canNavigateToStems);
+    stemToggle.classList.toggle("active", viewingStems);
+    stemToggle.classList.toggle("pending", stemPending);
+    stemToggle.setAttribute("aria-pressed", String(viewingStems));
+    stemToggle.setAttribute("aria-busy", String(stemSplitBusy));
+    stemToggle.title = stemSession
+      ? (stemSession.viewingStems ? "Show original waveform" : "Show stem waveforms")
+      : stemDerivedTrack ? "This track is already a stem mix"
+      : trackHasSavedStems ? "Show stem waveforms"
+      : stemSplitBusy ? "Splitting active sample into stems"
+      : stemEligible ? "Split active sample into four stems"
+      : "Stem splitting supports samples up to 30 seconds";
+  }
   libraryTab.disabled = recording;
   trackNameInput.disabled = !recording && !hasTape;
   playLight.classList.toggle("lit", playing);
@@ -1645,19 +2190,23 @@ function syncTransport() {
 }
 
 function playTape() {
+  const request = ++playbackRequest;
   suppressAutoPlay = false;
   if (!blob) return;
   resetJogState();
   const ctx = getAudio();
   const resumed = ctx.state === "running" ? Promise.resolve() : ctx.resume();
   Promise.all([ensureDecoded(), resumed]).then(async () => {
-    if (mode === "record" || !tapeBuffer) return;
+    if (request !== playbackRequest || mode === "record" || !tapeBuffer) return;
+    const requestedBuffer = tapeBuffer;
     try {
       await ensureTapeTransport(tapeBuffer);
     } catch (error) {
+      if (request !== playbackRequest || tapeBuffer !== requestedBuffer) return;
       console.warn("Sample-level tape transport unavailable; using fallback playback", error);
       dropTapeTransport();
     }
+    if (request !== playbackRequest || tapeBuffer !== requestedBuffer || mode === "record") return;
     if (!tapeTransportNode && !tapeBufferRev) tapeBufferRev = BufferOps.invertBuffer(tapeBuffer, ctx);
     const bounds = transportBounds();
     if (playheadMs < bounds.start || playheadMs >= bounds.end - 1) playheadMs = bounds.start;
@@ -1875,8 +2424,14 @@ function queueWheelScrub(deltaPx, nativeMomentum = false) {
   lastWheelAt = now;
 }
 
-function zoomWave(scale) {
+function zoomWave(scale, anchorClientX = null) {
+  const prevWindow = waveWindowMs;
   waveWindowMs = Math.min(WAVE_WINDOW_MAX, Math.max(WAVE_WINDOW_MIN, waveWindowMs * scale));
+  if (editMode && Number.isFinite(anchorClientX) && prevWindow !== waveWindowMs) {
+    const before = WaveformView.timeAtClientX(anchorClientX, waveCanvas, prevWindow, editViewCenterMs);
+    const after = WaveformView.timeAtClientX(anchorClientX, waveCanvas, waveWindowMs, editViewCenterMs);
+    editViewCenterMs = Math.max(0, Math.min(tapeLimit(), editViewCenterMs + (before - after)));
+  }
   drawWave(playheadMs);
 }
 
@@ -1887,6 +2442,15 @@ function panEditWave(deltaPx) {
     Math.min(tapeLimit(), editViewCenterMs + deltaPx * gestureMsPerPx())
   );
   drawWave(playheadMs);
+}
+
+function applyWheelScroll(deltaPx) {
+  if (editMode) {
+    panEditWave(deltaPx);
+    return;
+  }
+  if (wavePointers.size > 0) return;
+  queueWheelScrub(deltaPx);
 }
 
 function pointerDistance() {
@@ -2116,8 +2680,24 @@ function mediaRecorderOptions() {
   return mimeType ? { mimeType, audioBitsPerSecond } : { audioBitsPerSecond };
 }
 
+let recordStartPending = false;
+
 async function startRecording() {
+  if (mode === "record" || recordStartPending) return;
+  recordStartPending = true;
+  recordBtn.disabled = true;
+  try {
+    await startRecordingInner();
+  } finally {
+    recordStartPending = false;
+    syncTransport();
+  }
+}
+
+async function startRecordingInner() {
   suppressAutoPlay = false;
+  clearStemSession();
+  stemDerivedTrack = false;
   setScreenView("live");
   if (editMode) await setEditMode(false);
 
@@ -2202,7 +2782,14 @@ async function startRecording() {
       if (recordingCleanup) recordingCleanup();
       recordingCleanup = null;
       dropMeter();
-      blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      const stoppedRecorder = mediaRecorder;
+      blob = new Blob(chunks, { type: stoppedRecorder?.mimeType || "audio/webm" });
+      chunks = [];
+      if (stoppedRecorder) {
+        stoppedRecorder.ondataavailable = null;
+        stoppedRecorder.onstop = null;
+      }
+      mediaRecorder = null;
       tapeEndMs = playheadMs;
       cropStartMs = 0;
       cropEndMs = 0;
@@ -2326,6 +2913,8 @@ function setScreenView(view) {
 
 function clearLoadedTrack() {
   stopTransport();
+  clearStemSession();
+  stemDerivedTrack = false;
   blob = null;
   tapeBuffer = null;
   tapeBufferRev = null;
@@ -2375,19 +2964,13 @@ function persistRecordOnClick(enabled) {
   } catch {}
 }
 
-let autoRecordStartPending = false;
 function maybeStartRecordingFromClick() {
-  if (mode === "record" || autoRecordStartPending) return;
-  autoRecordStartPending = true;
-  startRecording()
-    .catch((error) => {
-      if (error.code === "system-audio-missing") statusEl.textContent = "share audio to record";
-      else if (error.code === "system-audio-unsupported") statusEl.textContent = "system audio unavailable";
-      else statusEl.textContent = recordSourceSelect.value === "mic" ? "mic blocked" : "capture blocked";
-    })
-    .finally(() => {
-      autoRecordStartPending = false;
-    });
+  if (mode === "record" || recordStartPending) return;
+  startRecording().catch((error) => {
+    if (error.code === "system-audio-missing") statusEl.textContent = "share audio to record";
+    else if (error.code === "system-audio-unsupported") statusEl.textContent = "system audio unavailable";
+    else statusEl.textContent = recordSourceSelect.value === "mic" ? "mic blocked" : "capture blocked";
+  });
 }
 
 function updateSourceControls() {
@@ -2428,21 +3011,47 @@ function seekFromKeyboard(nextMs) {
   statusEl.textContent = `seek ${Geometry.formatTime(playheadMs)}`;
 }
 
-function adjustEditSelection(side, deltaMs) {
+function adjustEditSelection(side, deltaMs, useBeatSnap = false) {
   if (!editMode || !blob) return;
   const limit = tapeLimit();
   const selection = editSelectionBounds();
+  const beats = currentBeatData?.beats || [];
+  const shouldSnap = (useBeatSnap || loopSnapEnabled) && Boolean(BeatDetector) && beats.length > 0;
+
   if (!selection) {
-    const other = Math.max(0, Math.min(limit, playheadMs + deltaMs));
+    let other = Math.max(0, Math.min(limit, playheadMs + deltaMs));
+    if (shouldSnap) {
+      const snap = BeatDetector.snapToBeat(other, beats, 200);
+      if (snap.beatIndex >= 0) other = snap.timeMs;
+    }
     editStartMs = Math.min(playheadMs, other);
     editEndMs = Math.max(playheadMs, other);
   } else if (side === "start") {
-    editStartMs = Math.max(0, Math.min(selection.end - CROP_MIN_MS, selection.start + deltaMs));
+    let target = selection.start + deltaMs;
+    if (shouldSnap) {
+      target = deltaMs < 0
+        ? BeatDetector.findPrevBeat(selection.start, beats)
+        : BeatDetector.findNextBeat(selection.start, beats);
+    }
+    editStartMs = Math.max(0, Math.min(selection.end - CROP_MIN_MS, target));
     editEndMs = selection.end;
   } else {
+    let target = selection.end + deltaMs;
+    if (shouldSnap) {
+      target = deltaMs < 0
+        ? BeatDetector.findPrevBeat(selection.end, beats)
+        : BeatDetector.findNextBeat(selection.end, beats);
+    }
     editStartMs = selection.start;
-    editEndMs = Math.min(limit, Math.max(selection.start + CROP_MIN_MS, selection.end + deltaMs));
+    editEndMs = Math.min(limit, Math.max(selection.start + CROP_MIN_MS, target));
   }
+
+  if (tapeBuffer && BeatDetector && editSelectionBounds()) {
+    editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editStartMs, 10);
+    editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editEndMs, 10);
+  }
+
+  syncActiveTransportBounds({ restartFallback: true });
   syncEditControls();
   drawWave(playheadMs);
   statusEl.textContent = editSelectionBounds() ? "selection adjusted" : "extend selection";
@@ -2468,6 +3077,7 @@ function selectAllForEdit() {
   editStartMs = 0;
   editEndMs = tapeLimit();
   playheadMs = 0;
+  syncActiveTransportBounds({ restartFallback: true, seekToPlayhead: true });
   syncEditControls();
   showTime(playheadMs);
   statusEl.textContent = "all selected";
@@ -2535,6 +3145,7 @@ function releaseWavePointer(event) {
       editStartMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editStartMs, 10);
       editEndMs = BeatDetector.snapToZeroCrossing(tapeBuffer, editEndMs, 10);
     }
+    syncActiveTransportBounds({ restartFallback: true });
     setEditHandleHover(editHandleAt(event.clientX));
     syncEditControls();
     drawWave(playheadMs);
@@ -2561,6 +3172,7 @@ function releaseWavePointer(event) {
     if (playheadMs < bounds.start || playheadMs > bounds.end) {
       playheadMs = Math.max(bounds.start, Math.min(bounds.end, playheadMs));
     }
+    syncActiveTransportBounds({ restartFallback: true });
     showTime(playheadMs);
     drawWave(playheadMs);
     statusEl.textContent = "tape ready";
@@ -2588,13 +3200,53 @@ function releaseWavePointer(event) {
 settingsToggle.addEventListener("click", () => setSettingsOpen(settingsMenu.hidden));
 liveTab.addEventListener("click", () => setScreenView("live"));
 libraryTab.addEventListener("click", () => setScreenView("library"));
+stemToggle?.addEventListener("click", async () => {
+  if (stemSplitBusy || stemViewTransitioning) return;
+  if (editMode) {
+    // The stem button is also direct mode navigation. Let the ordinary Edit
+    // exit animation run while the stem waveform begins its own morph.
+    await setEditMode(false);
+  }
+  if (stemSession) {
+    animateStemView(!stemSession.viewingStems);
+    return;
+  }
+  if (trackHasSavedStems && libraryController.currentTrackId) {
+    const restored = await restoreSavedStems(libraryController.currentTrackId);
+    if (restored) return;
+  }
+  if (stemDerivedTrack) {
+    statusEl.textContent = "this track is already a stem mix";
+    return;
+  }
+  if (!blob || mode === "record" || editMode) return;
+  const bounds = cropBounds();
+  const durationMs = tapeLimit();
+  if (!(durationMs > 0) || durationMs > 30000) {
+    statusEl.textContent = "stems support samples up to 30 seconds";
+    return;
+  }
+  window.dispatchEvent(new CustomEvent("sampla:open-stems", {
+    detail: {
+      autoStart: true,
+      returnView: "live",
+      source: {
+        id: libraryController.currentTrackId || crypto.randomUUID(),
+        name: trackNameInput.value.trim() || "Untitled",
+        blob,
+        durationMs,
+        tapeDurationMs: tapeLimit(),
+        cropStartMs: bounds.start,
+        cropEndMs: bounds.end,
+        bpm: currentBeatData?.bpm || null,
+      },
+    },
+  }));
+});
 editToggle.addEventListener("click", () => setEditMode(!editMode));
 editDoneBtn.addEventListener("click", () => {
   finishEdits().catch(() => setEditMode(false));
 });
-editCutBtn.addEventListener("click", cutEditSelection);
-editCopyBtn.addEventListener("click", copyEditSelection);
-editPasteBtn.addEventListener("click", pasteEditClipboard);
 editFxToggle.addEventListener("click", () => setEditFxOpen(editFxMenu.hidden));
 editReverseBtn.addEventListener("click", () => commitBufferEdit("reverse"));
 
@@ -2756,11 +3408,33 @@ document.addEventListener("keydown", (event) => {
     if (!blob || mode === "record") return;
     event.preventDefault();
     if (tapeBuffer) {
+      const bounds = cropBounds();
+      const hasCrop = bounds.start > 0 || bounds.end < (tapeBuffer.duration * 1000) - 1;
+      if (hasCrop) {
+        cropTrackHard(bounds.start, bounds.end);
+      }
+      if (stemSession?.viewingStems) {
+        libraryController.storeStemMix({
+          blob,
+          buffer: tapeBuffer,
+          cropBounds: cropBounds(),
+          editMarks,
+          bpm: currentBeatData?.bpm || null,
+          isLoop: loopEnabled,
+          parentId: stemSession.sourceId || libraryController.currentTrackId,
+        }).then(() => {
+          statusEl.textContent = "stem mix stored in library";
+        });
+        return;
+      }
       libraryController.storeTape({
         blob,
         buffer: tapeBuffer,
         cropBounds: cropBounds(),
         editMarks,
+        bpm: currentBeatData?.bpm || null,
+        isLoop: loopEnabled,
+        stemDerived: stemDerivedTrack || Boolean(stemSession?.viewingStems),
       });
     }
     return;
@@ -2777,8 +3451,10 @@ document.addEventListener("keydown", (event) => {
     if (!blob || mode === "record") return;
     event.preventDefault();
     const direction = event.key === "ArrowLeft" ? -1 : 1;
-    if (editMode && (event.altKey || event.shiftKey)) {
-      adjustEditSelection(event.altKey ? "start" : "end", direction * 10);
+    if (editMode && event.altKey && event.shiftKey) {
+      nudgeEditLoop(direction);
+    } else if (editMode && (event.altKey || event.shiftKey)) {
+      adjustEditSelection(event.altKey ? "start" : "end", direction * 10, loopSnapEnabled);
     } else {
       seekFromKeyboard(playheadMs + direction * (event.shiftKey ? 1000 : 100));
     }
@@ -2786,8 +3462,14 @@ document.addEventListener("keydown", (event) => {
   }
   if ((event.key === "Home" || event.key === "End") && blob && mode !== "record") {
     event.preventDefault();
-    const bounds = editMode ? { start: 0, end: tapeLimit() } : cropBounds();
+    const selection = editSelectionBounds();
+    const bounds = editMode ? (selection || { start: 0, end: tapeLimit() }) : cropBounds();
     seekFromKeyboard(event.key === "Home" ? bounds.start : bounds.end);
+    return;
+  }
+  if ((event.key === "[" || event.key === "]") && blob && mode !== "record") {
+    event.preventDefault();
+    seekToBeat(event.key === "[" ? -1 : 1, event.shiftKey);
     return;
   }
 
@@ -2802,6 +3484,7 @@ document.addEventListener("keydown", (event) => {
     } else if (editSelectionBounds()) {
       editStartMs = null;
       editEndMs = null;
+      syncActiveTransportBounds({ restartFallback: true });
       syncEditControls();
       drawWave(playheadMs);
       statusEl.textContent = "selection cleared";
@@ -2812,15 +3495,6 @@ document.addEventListener("keydown", (event) => {
   } else if (editMode && command && key === "a") {
     event.preventDefault();
     selectAllForEdit();
-  } else if (editMode && command && key === "x") {
-    event.preventDefault();
-    cutEditSelection();
-  } else if (editMode && command && key === "c") {
-    event.preventDefault();
-    copyEditSelection();
-  } else if (editMode && command && key === "v") {
-    event.preventDefault();
-    pasteEditClipboard();
   } else if (editMode && (event.key === "Delete" || event.key === "Backspace")) {
     event.preventDefault();
     commitBufferEdit("cut");
@@ -2891,13 +3565,32 @@ saveBtn.addEventListener("click", async () => {
   if (!blob) return;
   const buffer = await ensureDecoded();
   if (buffer) {
+    const bounds = cropBounds();
+    const hasCrop = bounds.start > 0 || bounds.end < ((tapeBuffer || buffer).duration * 1000) - 1;
+    if (hasCrop) {
+      cropTrackHard(bounds.start, bounds.end);
+    }
+    if (stemSession?.viewingStems) {
+      await libraryController.storeStemMix({
+        blob,
+        buffer: tapeBuffer || buffer,
+        cropBounds: cropBounds(),
+        editMarks,
+        bpm: currentBeatData?.bpm || null,
+        isLoop: loopEnabled,
+        parentId: stemSession.sourceId || libraryController.currentTrackId,
+      });
+      statusEl.textContent = "stem mix stored in library";
+      return;
+    }
     libraryController.storeTape({
       blob,
-      buffer,
+      buffer: tapeBuffer || buffer,
       cropBounds: cropBounds(),
       editMarks,
       bpm: currentBeatData?.bpm || null,
       isLoop: loopEnabled,
+      stemDerived: stemDerivedTrack || Boolean(stemSession?.viewingStems),
     });
   }
 });
@@ -2905,6 +3598,7 @@ loopBtn.addEventListener("click", () => {
   loopEnabled = !loopEnabled;
   loopBtn.classList.toggle("active", loopEnabled);
   loopBtn.setAttribute("aria-pressed", String(loopEnabled));
+  syncActiveTransportBounds();
   statusEl.textContent = loopEnabled ? "loop on" : "loop off";
 });
 
@@ -2924,6 +3618,12 @@ if (editLoopSnapBtn) {
 if (editLoop1BarBtn) editLoop1BarBtn.addEventListener("click", () => applyEditBarPreset(1));
 if (editLoop2BarBtn) editLoop2BarBtn.addEventListener("click", () => applyEditBarPreset(2));
 if (editLoop4BarBtn) editLoop4BarBtn.addEventListener("click", () => applyEditBarPreset(4));
+if (editLoopPrevBtn) {
+  editLoopPrevBtn.addEventListener("click", (event) => nudgeEditLoop(-1, event.altKey ? 4 : 1));
+}
+if (editLoopNextBtn) {
+  editLoopNextBtn.addEventListener("click", (event) => nudgeEditLoop(1, event.altKey ? 4 : 1));
+}
 if (editLoopAutoBtn) editLoopAutoBtn.addEventListener("click", applyEditAutoLoop);
 if (editLoopCropBtn) editLoopCropBtn.addEventListener("click", applyEditLoopCrop);
 if (editLoopAuditionBtn) editLoopAuditionBtn.addEventListener("click", toggleEditAudition);
@@ -3013,6 +3713,7 @@ waveCanvas.addEventListener("pointermove", (event) => {
       editStartMs = Math.min(editAnchorMs, at);
       editEndMs = Math.max(editAnchorMs, at);
     }
+    syncActiveTransportBounds();
     syncEditControls();
     drawWave(playheadMs);
     return;
@@ -3081,21 +3782,16 @@ waveCanvas.addEventListener(
   (event) => {
     event.preventDefault();
     if (mode === "record" || (!blob && !wavePeaks.length)) return;
+    if (cropPointerId !== null || editPointerId !== null || wavePointers.size >= 2) return;
+
+    const pagePx = Math.max(1, waveCanvas._cssWidth || waveCanvas.clientWidth);
+    const { x: dx, y: dy } = WaveformView.normalizeWheelDeltas(event, pagePx);
+
     if (event.ctrlKey || event.metaKey) {
-      zoomWave(2 ** (event.deltaY * 0.01));
+      zoomWave(WaveformView.wheelZoomScale(dy), event.clientX);
       return;
     }
-    if (!Number.isFinite(event.deltaX)) return;
-    const pixelScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? Math.max(1, waveCanvas._cssWidth || waveCanvas.clientWidth)
-        : 1;
-    if (editMode) {
-      panEditWave(event.deltaX * pixelScale);
-      return;
-    }
-    if (wavePointers.size > 0) return;
+
     const nativeMomentum = event.momentum === true || Boolean(Number(
       event.webkitMomentumPhase ?? event.momentumPhase ?? 0
     ));
@@ -3103,8 +3799,24 @@ waveCanvas.addEventListener(
       queueWheelScrub(0, true);
       return;
     }
-    if (Math.abs(event.deltaX) < 0.01) return;
-    queueWheelScrub(event.deltaX * pixelScale);
+
+    if (event.shiftKey) {
+      const scrollDelta = Math.abs(dx) >= 0.01 ? dx : dy;
+      if (Math.abs(scrollDelta) >= 0.01) applyWheelScroll(scrollDelta);
+      return;
+    }
+
+    // Preserve horizontal trackpad scrubbing even when a diagonal gesture also
+    // contains a larger vertical component. A mouse wheel has no deltaX, so
+    // its vertical movement can zoom without changing the trackpad contract.
+    if (Math.abs(dx) >= 0.01) {
+      applyWheelScroll(dx);
+      return;
+    }
+
+    if (Math.abs(dy) >= 0.01) {
+      zoomWave(WaveformView.wheelZoomScale(dy), event.clientX);
+    }
   },
   { passive: false }
 );

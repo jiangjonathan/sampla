@@ -9,18 +9,12 @@ async function recordOnClickEnabled() {
   }
 }
 
-function popupUrl(autoRecord) {
-  const url = chrome.runtime.getURL("popup.html");
-  return autoRecord ? `${url}?autoRecord=1` : url;
-}
-
 chrome.action.onClicked.addListener(async (tab) => {
-  ensureOffscreenDocument().catch(() => {});
+  waitForOffscreenReady().catch(() => {});
   if (!tab?.id) return;
   const autoRecord = await recordOnClickEnabled();
   const url = tab.url || "";
   if (url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("edge://") || url.startsWith("devtools://")) {
-    chrome.tabs.create({ url: popupUrl(autoRecord) });
     return;
   }
 
@@ -33,14 +27,32 @@ chrome.action.onClicked.addListener(async (tab) => {
         files: ["src/content.js"],
       });
       await chrome.tabs.sendMessage(tab.id, { type: "SAMPLA_TOGGLE_WINDOW", autoRecord });
-    } catch (e) {
-      console.error("Failed to inject Sampla window, opening in tab:", e);
-      chrome.tabs.create({ url: popupUrl(autoRecord) });
+    } catch (error) {
+      // Chrome blocks content-script injection on protected pages (including
+      // the Web Store and its built-in viewers). Keep the action a no-op there
+      // instead of replacing the requested overlay with a standalone tab.
+      console.debug("Sampla overlay is unavailable on this page:", error);
     }
   }
 });
 
 let creatingOffscreenPromise = null;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sendToOffscreen(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (res) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(res);
+      }
+    });
+  });
+}
 
 async function ensureOffscreenDocument() {
   const existingContexts = await chrome.runtime.getContexts({
@@ -63,8 +75,90 @@ async function ensureOffscreenDocument() {
   return creatingOffscreenPromise;
 }
 
+async function waitForOffscreenReady() {
+  await ensureOffscreenDocument();
+  const deadline = Date.now() + 2500;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const res = await sendToOffscreen({ type: "OFFSCREEN_PING" });
+      if (res?.ok) return;
+      lastError = new Error("Offscreen recorder did not respond");
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(40);
+  }
+  throw lastError || new Error("Offscreen recorder is not ready");
+}
+
+function getTabCaptureStreamId(opts) {
+  return new Promise((resolve, reject) => {
+    chrome.tabCapture.getMediaStreamId(opts, (streamId) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (!streamId) {
+        reject(new Error("Unable to obtain tab media stream ID."));
+      } else {
+        resolve(streamId);
+      }
+    });
+  });
+}
+
+async function resolveCaptureTabId(message, sender) {
+  let tabId = message.tabId || sender.tab?.id;
+  if (!tabId || sender.tab?.url?.startsWith("chrome-extension://")) {
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (activeTab && !activeTab.url?.startsWith("chrome-extension://") && !activeTab.url?.startsWith("chrome://")) {
+      tabId = activeTab.id;
+    } else {
+      const allTabs = await chrome.tabs.query({ active: true });
+      const nonExt = allTabs.find((t) => !t.url?.startsWith("chrome-extension://") && !t.url?.startsWith("chrome://"));
+      if (nonExt) tabId = nonExt.id;
+      else if (activeTab) tabId = activeTab.id;
+    }
+  }
+  return tabId;
+}
+
+async function obtainTabStreamId(tabId) {
+  try {
+    return await getTabCaptureStreamId(tabId ? { targetTabId: tabId } : {});
+  } catch (idErr) {
+    if (tabId) return getTabCaptureStreamId({});
+    throw idErr;
+  }
+}
+
+async function startTabCapture(message, sender) {
+  await waitForOffscreenReady();
+  const tabId = await resolveCaptureTabId(message, sender);
+  const quality = message.quality || "128000";
+  const includeMic = Boolean(message.includeMic);
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const streamId = await obtainTabStreamId(tabId);
+      const offscreenRes = await sendToOffscreen({
+        type: "OFFSCREEN_START_CAPTURE",
+        streamId,
+        quality,
+        includeMic,
+      });
+      if (offscreenRes?.ok) return offscreenRes;
+      lastError = new Error(offscreenRes?.error || "Tab capture failed");
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt === 0) await waitForOffscreenReady();
+  }
+  throw lastError || new Error("Failed to start tab capture");
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  ensureOffscreenDocument().catch(() => {});
+  waitForOffscreenReady().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -82,74 +176,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "SAMPLA_ENSURE_OFFSCREEN") {
-    ensureOffscreenDocument()
+    waitForOffscreenReady()
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 
   if (message?.type === "SAMPLA_START_TAB_CAPTURE") {
-    (async () => {
-      try {
-        let tabId = message.tabId || sender.tab?.id;
-        if (!tabId || sender.tab?.url?.startsWith("chrome-extension://")) {
-          const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-          if (activeTab && !activeTab.url?.startsWith("chrome-extension://") && !activeTab.url?.startsWith("chrome://")) {
-            tabId = activeTab.id;
-          } else {
-            const allTabs = await chrome.tabs.query({ active: true });
-            const nonExt = allTabs.find((t) => !t.url?.startsWith("chrome-extension://") && !t.url?.startsWith("chrome://"));
-            if (nonExt) tabId = nonExt.id;
-            else if (activeTab) tabId = activeTab.id;
-          }
-        }
-
-        const getStreamIdPromise = (opts) =>
-          new Promise((resolve, reject) => {
-            chrome.tabCapture.getMediaStreamId(opts, (streamId) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else if (!streamId) {
-                reject(new Error("Unable to obtain tab media stream ID."));
-              } else {
-                resolve(streamId);
-              }
-            });
-          });
-
-        let streamId = null;
-        try {
-          streamId = await getStreamIdPromise(tabId ? { targetTabId: tabId } : {});
-        } catch (idErr) {
-          if (tabId) {
-            // Fallback without targetTabId (defaults to active tab)
-            streamId = await getStreamIdPromise({});
-          } else {
-            throw idErr;
-          }
-        }
-
-        await ensureOffscreenDocument();
-
-        chrome.runtime.sendMessage(
-          {
-            type: "OFFSCREEN_START_CAPTURE",
-            streamId,
-            quality: message.quality || "128000",
-            includeMic: Boolean(message.includeMic),
-          },
-          (offscreenRes) => {
-            if (chrome.runtime.lastError) {
-              sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-            } else {
-              sendResponse(offscreenRes || { ok: true });
-            }
-          }
-        );
-      } catch (err) {
-        sendResponse({ ok: false, error: err.message || "Failed to start tab capture" });
-      }
-    })();
+    startTabCapture(message, sender)
+      .then((offscreenRes) => sendResponse(offscreenRes || { ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message || "Failed to start tab capture" }));
     return true;
   }
 
@@ -167,7 +203,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "SAMPLA_GET_TAB_STREAM_ID") {
     (async () => {
       try {
-        ensureOffscreenDocument().catch(() => {});
+        waitForOffscreenReady().catch(() => {});
         let tabId = message?.tabId || sender.tab?.id;
         if (!tabId || sender.tab?.url?.startsWith("chrome-extension://")) {
           const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });

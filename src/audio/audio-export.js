@@ -61,5 +61,5 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  window.SamplaAudioExport = { save, toWavBlob };
+  (typeof window !== "undefined" ? window : globalThis).SamplaAudioExport = { save, toWavBlob };
 })();

@@ -17,6 +17,25 @@
   let statusMode = null;
   let statusDot = null;
 
+  function keepWindowInViewport() {
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const maxX = Math.max(8, window.innerWidth - rect.width - 8);
+    const maxY = Math.max(8, window.innerHeight - rect.height - 8);
+    const left = Math.max(8, Math.min(maxX, rect.left));
+    const top = Math.max(8, Math.min(maxY, rect.top));
+
+    // Preserve the default top-right placement until the viewport actually
+    // pushes the window out of bounds. Once it does, pin it to visible pixels.
+    if (rect.left < 8 || rect.right > window.innerWidth - 8) {
+      container.style.left = `${left}px`;
+      container.style.right = "auto";
+    }
+    if (rect.top < 8 || rect.bottom > window.innerHeight - 8) {
+      container.style.top = `${top}px`;
+    }
+  }
+
   function applyOverlayStatus(data) {
     if (!statusTime || !statusMode || !statusDot || !data) return;
     if (typeof data.time === "string") statusTime.textContent = data.time;
@@ -246,6 +265,13 @@
     container.append(header, iframeShell);
     shadowRoot.append(container);
     document.documentElement.append(hostElement);
+    keepWindowInViewport();
+
+    window.addEventListener("resize", () => {
+      if (hostElement?.isConnected && hostElement.style.display !== "none") {
+        keepWindowInViewport();
+      }
+    });
 
     // Listen for dynamic size updates from popup
     window.addEventListener("message", (event) => {
@@ -350,13 +376,21 @@
       createFloatingWindow();
       return;
     }
-    const shouldShow = typeof force === "boolean" ? force : hostElement.style.display === "none";
+    // Some client-rendered sites replace large parts of the document and can
+    // detach extension-injected nodes. Treat a detached host as hidden so the
+    // next toolbar click restores it instead of toggling an invisible node off.
+    const wasDetached = !hostElement.isConnected;
+    const shouldShow = typeof force === "boolean" ? force : wasDetached || hostElement.style.display === "none";
+    if (shouldShow && wasDetached) {
+      document.documentElement.append(hostElement);
+    }
     hostElement.style.display = shouldShow ? "block" : "none";
     if (!shouldShow) {
       try {
         iframe.contentWindow.postMessage({ type: "SAMPLA_SHUTDOWN" }, "*");
       } catch {}
     } else {
+      keepWindowInViewport();
       try {
         iframe.contentWindow.postMessage({ type: "SAMPLA_RESUME" }, "*");
       } catch {}

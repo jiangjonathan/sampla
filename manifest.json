@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sampla",
   "version": "0.1.43",
-  "description": "A tape-machine recorder for quick voice notes.",
+  "description": "tape machine style recorder for sampling and play",
   "action": {
     "default_title": "Sampla"
   },
@@ -16,8 +16,13 @@
     "tabCapture",
     "offscreen"
   ],
+  "host_permissions": [
+    "https://huggingface.co/*",
+    "https://*.hf.co/*",
+    "https://*.xethub.hf.co/*"
+  ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },
   "web_accessible_resources": [
     {

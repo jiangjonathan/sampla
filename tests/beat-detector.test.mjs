@@ -117,3 +117,57 @@ test("snapToZeroCrossing aligns to clean positive slope", () => {
   const snapped = BeatDetector.snapToZeroCrossing(buffer, 22, 10);
   assert.equal(Math.round(snapped), 20);
 });
+
+test("findPrevBeat and findNextBeat navigate through beat arrays", () => {
+  const beats = [0, 500, 1000, 1500, 2000, 2500];
+
+  assert.equal(BeatDetector.findPrevBeat(1200, beats), 1000);
+  assert.equal(BeatDetector.findPrevBeat(1000, beats), 500);
+  assert.equal(BeatDetector.findPrevBeat(100, beats), 0);
+  assert.equal(BeatDetector.findPrevBeat(0, beats), 0);
+
+  assert.equal(BeatDetector.findNextBeat(700, beats), 1000);
+  assert.equal(BeatDetector.findNextBeat(1000, beats), 1500);
+  assert.equal(BeatDetector.findNextBeat(2400, beats), 2500);
+  assert.equal(BeatDetector.findNextBeat(2500, beats), 2500);
+});
+
+test("formatMusicalLength returns concise bar and beat labels", () => {
+  const beatIntervalMs = 500; // 120 BPM: 1 beat = 500ms, 1 bar = 2000ms
+
+  assert.equal(BeatDetector.formatMusicalLength(2000, beatIntervalMs), "1 BAR");
+  assert.equal(BeatDetector.formatMusicalLength(4000, beatIntervalMs), "2 BARS");
+  assert.equal(BeatDetector.formatMusicalLength(8000, beatIntervalMs), "4 BARS");
+  assert.equal(BeatDetector.formatMusicalLength(2500, beatIntervalMs), "1 BAR 1b");
+  assert.equal(BeatDetector.formatMusicalLength(1000, beatIntervalMs), "2 BEATS");
+  assert.equal(BeatDetector.formatMusicalLength(0, beatIntervalMs), "");
+});
+
+test("autoDetectLoop cycles through candidate bars when requested", () => {
+  const beatData = {
+    bpm: 120,
+    beatIntervalMs: 500,
+    barIntervalMs: 2000,
+    bars: [0, 2000, 4000, 6000, 8000],
+    beats: [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000],
+  };
+
+  const cand0 = BeatDetector.autoDetectLoop(beatData, 10000, 2, 0);
+  assert.equal(cand0.start, 0);
+  assert.equal(cand0.end, 4000);
+
+  const cand1 = BeatDetector.autoDetectLoop(beatData, 10000, 2, 1);
+  assert.equal(cand1.start, 2000);
+  assert.equal(cand1.end, 6000);
+
+  const cand2 = BeatDetector.autoDetectLoop(beatData, 10000, 2, 2);
+  assert.equal(cand2.start, 4000);
+  assert.equal(cand2.end, 8000);
+});
+
+test("detectBeats populates transients array for rhythmic attacks", () => {
+  const buffer = createPulseBuffer(120, 3, 44100);
+  const result = BeatDetector.detectBeats(buffer);
+  assert.ok(Array.isArray(result.transients), "Result should contain transients array");
+  assert.ok(result.transients.length > 0, "Should detect transient onset peaks in pulse buffer");
+});
