@@ -164,6 +164,11 @@
             <input id="track-name" type="text" maxlength="48" placeholder="UNTITLED" aria-label="Track name" autocomplete="off" spellcheck="false" />
             <output id="track-duration" for="track-name">00:00</output>
             <div class="track-icons">
+              <button id="stem-toggle" class="screen-icon stem-toggle" type="button" aria-label="Split active sample into stems" title="Split active sample into four stems" disabled>
+                <svg viewBox="0 0 18 18" aria-hidden="true">
+                  <path d="M3 9h4.5M7.5 9c3.25 0 2.5-4.5 6.25-4.5H16M13.5 2 16 4.5 13.5 7M7.5 9c3.25 0 2.5 4.5 6.25 4.5H16M13.5 11 16 13.5 13.5 16" />
+                </svg>
+              </button>
               <button id="edit-toggle" class="screen-icon edit-toggle" type="button" aria-label="Enter splice edit mode" aria-keyshortcuts="E" aria-pressed="false" disabled>
                 <svg viewBox="0 0 18 18" aria-hidden="true">
                   <g class="scissor-half scissor-half-top">
@@ -185,9 +190,6 @@
           <div id="edit-toolbar" class="edit-toolbar" aria-label="Splice tools" hidden>
             <output id="edit-range" aria-live="polite">DRAG SELECT</output>
             <div class="edit-actions">
-              <button id="edit-cut" type="button" title="Cut selection" aria-keyshortcuts="Control+X Meta+X" disabled><span>CUT</span></button>
-              <button id="edit-copy" type="button" title="Copy selection" aria-keyshortcuts="Control+C Meta+C" disabled><span>COPY</span></button>
-              <button id="edit-paste" type="button" title="Paste at the playhead" aria-keyshortcuts="Control+V Meta+V" disabled><span>PASTE</span></button>
               <button id="edit-loop-toggle" type="button" aria-label="Open loop tools" aria-controls="edit-loop-menu" aria-expanded="false"><span>LOOP</span></button>
               <button id="edit-fx-toggle" type="button" aria-label="Open audio effects" aria-controls="edit-fx-menu" aria-expanded="false"><span>FX</span></button>
               <button id="edit-undo" type="button" title="Undo last edit" aria-keyshortcuts="Control+Z Meta+Z" disabled><span>UNDO</span></button>
@@ -224,13 +226,19 @@
           </div>
           <div class="timeline">
             <canvas id="wave" aria-label="Tape waveform with draggable crop handles" aria-describedby="wave-keyboard-help" tabindex="0"></canvas>
-            <p id="wave-keyboard-help" class="sr-only">Space plays or stops. Arrow keys seek. E toggles edit mode. B toggles the library. In edit mode, click to place the playhead, drag to select, Command or Control X cuts, C copies, V pastes, Delete removes, Shift plus arrows adjusts the selection end, and Alt plus arrows adjusts its start.</p>
+            <div id="stem-progress-overlay" class="stem-progress-overlay" role="status" aria-live="polite" hidden>
+              <span class="stem-progress-copy"><span id="stem-progress-label">Splitting stems…</span></span>
+              <div id="stem-progress" class="stem-progress" role="progressbar" aria-label="Stem separation progress"><span></span></div>
+              <button id="stem-cancel" type="button">CANCEL</button>
+            </div>
+            <div id="stem-lane-controls" class="stem-lane-controls" aria-label="Toggle stems" hidden></div>
+            <p id="wave-keyboard-help" class="sr-only">Space plays or stops. Arrow keys seek. E toggles edit mode. B toggles the library. In edit mode, click to place the playhead, drag to select, right click for cut, copy, and paste, Delete removes, Shift plus arrows adjusts the selection end, and Alt plus arrows adjusts its start.</p>
           </div>
           <div id="edit-context-menu" class="edit-context-menu" role="menu" aria-label="Edit audio" hidden>
             <div class="context-main-actions">
-              <button type="button" role="menuitem" data-edit-action="cut"><span>CUT</span><kbd data-shortcut="cut"></kbd></button>
-              <button type="button" role="menuitem" data-edit-action="copy"><span>COPY</span><kbd data-shortcut="copy"></kbd></button>
-              <button type="button" role="menuitem" data-edit-action="paste"><span>PASTE</span><kbd data-shortcut="paste"></kbd></button>
+              <button type="button" role="menuitem" data-edit-action="cut"><span>CUT</span></button>
+              <button type="button" role="menuitem" data-edit-action="copy"><span>COPY</span></button>
+              <button type="button" role="menuitem" data-edit-action="paste"><span>PASTE</span></button>
               <button type="button" role="menuitem" data-edit-action="delete"><span>DELETE</span><kbd data-shortcut="delete"></kbd></button>
             </div>
           </div>
@@ -294,5 +302,6 @@
     <script src="integrations/jam-canvas/canvas-auth-ui.js?v=0.1.43"></script>
     <script src="src/ui/library-controller.js?v=0.1.40"></script>
     <script src="src/ui/popup.js?v=0.1.43"></script>
+    <script type="module" src="src/ui/stems-controller.js?v=0.1.44"></script>
   </body>
 </html>

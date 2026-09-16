@@ -602,6 +602,36 @@ output {
   color: #796500;
 }
 
+.stem-toggle {
+  color: #20aeca;
+}
+
+.stem-toggle:hover:not(:disabled),
+.stem-toggle:focus-visible:not(:disabled),
+.stem-toggle.active,
+.stem-toggle[aria-pressed="true"] {
+  outline: none;
+  color: #32e6f4;
+}
+
+.stem-toggle:disabled {
+  color: #10363a;
+}
+
+/* Processing and waveform transitions are disabled against repeat clicks, but
+   they are live states rather than unavailable states. */
+.stem-toggle.pending:disabled {
+  color: #32e6f4;
+}
+
+.stem-toggle svg {
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+
 .edit-toggle:hover:not(:disabled),
 .edit-toggle:focus-visible:not(:disabled),
 .edit-toggle.active,
@@ -1102,6 +1132,135 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
   position: relative;
 }
 
+.stem-progress-overlay {
+  position: absolute;
+  z-index: 3;
+  inset: auto 0 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-top: 1px solid rgba(50, 230, 244, .45);
+  border-bottom: 0;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, .9);
+  color: #32e6f4;
+  font-size: 8px;
+  letter-spacing: .05em;
+}
+
+.stem-progress {
+  --stem-progress: 0%;
+  position: relative;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #061d25;
+}
+
+.stem-progress > span {
+  display: block;
+  width: var(--stem-progress);
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #32e6f4;
+  box-shadow: none;
+  transition: width .18s linear;
+}
+
+.stem-progress.indeterminate > span {
+  width: 28%;
+  height: 100%;
+  background: #32e6f4;
+  animation: stem-progress-scan 1.15s linear infinite;
+  transition: none;
+  border-radius: 0;
+}
+
+@keyframes stem-progress-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(357%); }
+}
+
+.stem-progress-overlay button {
+  appearance: none;
+  min-width: 0;
+  height: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #32e6f4;
+  font: 500 8px/1 var(--ui-font);
+  font-stretch: expanded;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transform: scaleX(var(--ui-stretch));
+  transform-origin: right center;
+  justify-self: end;
+}
+
+.stem-lane-controls {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 40px;
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  gap: 0;
+  background: #000;
+  pointer-events: none;
+}
+
+.stem-lane-controls button {
+  appearance: none;
+  min-height: 0;
+  width: 100%;
+  padding: 0 1px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  background: #000;
+  color: #ffffff;
+  font: 500 7.5px/1 var(--ui-font);
+  text-transform: uppercase;
+  font-stretch: expanded;
+  letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.stem-lane-controls button span {
+  display: inline-block;
+  transform: scaleX(var(--ui-stretch));
+  transform-origin: center center;
+}
+
+.stem-lane-controls button[aria-pressed="false"] {
+  color: #4b4b4b;
+}
+
+.stem-lane-controls button:hover,
+.stem-lane-controls button:focus-visible {
+  border-color: #32e6f4;
+  outline: none;
+}
+
 .library-toolbar {
   position: absolute;
   z-index: 2;
@@ -1132,7 +1291,7 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
   left: 50%;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   transform: translateX(-50%);
   white-space: nowrap;
 }
@@ -1152,7 +1311,7 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
 }
 
 .library-action {
-  width: 60px;
+  width: 56px;
   height: 22px;
   padding: 0 2px;
   box-sizing: border-box;
@@ -1221,6 +1380,13 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: center;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.track-row:hover,
+.track-row:focus-within {
+  background: rgba(255, 255, 255, 0.045);
 }
 
 .track-check {
@@ -1262,10 +1428,13 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
   text-align: left;
   text-transform: uppercase;
   cursor: pointer;
+  transition: color 120ms ease;
 }
 
 .track-load:hover,
-.track-load:focus-visible {
+.track-load:focus-visible,
+.track-row:hover .track-load,
+.track-row:focus-within .track-load {
   outline: none;
   color: var(--line);
 }
@@ -1275,12 +1444,118 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
 }
 
 .track-row-name {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   transform: scaleX(var(--ui-stretch));
   transform-origin: left center;
+}
+
+.track-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-stem-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--dim);
+  border-radius: 0;
+  color: var(--dim);
+  font: 500 8px/1 var(--ui-font);
+  font-stretch: expanded;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  gap: 4px;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.track-stem-badge::before {
+  content: "+";
+  width: 7px;
+  color: currentColor;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+.track-stem-badge[aria-expanded="true"]::before {
+  content: "−";
+}
+
+.track-stem-badge::after {
+  content: "";
+  position: absolute;
+  inset: -6px -4px;
+  background: transparent;
+}
+
+.track-stem-badge:hover,
+.track-stem-badge:focus-visible,
+.track-stem-badge.active {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--line);
+  outline: none;
+}
+
+.track-row:hover .track-stem-badge,
+.track-row.current .track-stem-badge {
+  border-color: var(--line);
+  color: var(--line);
+}
+
+.track-row.stem-child-row {
+  height: 26px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  margin-left: 10px;
+  width: calc(100% - 10px);
+}
+
+.track-row.stem-child-row .track-check {
+  margin-left: 6px;
+}
+
+.track-row.stem-child-row:hover,
+.track-row.stem-child-row:focus-within {
+  background: rgba(255, 255, 255, 0.065);
+  border-left-color: var(--line);
+}
+
+.track-row.stem-child-row .track-load {
+  color: #b0b0b0;
+  font-size: 9px;
+  text-transform: uppercase;
+  font-stretch: expanded;
+  letter-spacing: 0.08em;
+}
+
+.track-row.stem-child-row:hover .track-load,
+.track-row.stem-child-row:focus-within .track-load,
+.track-row.stem-child-row .track-load:hover,
+.track-row.stem-child-row .track-load:focus-visible {
+  color: var(--line);
+}
+
+.track-row.stem-child-row .child-name {
+  transform: scaleX(var(--ui-stretch));
+  transform-origin: left center;
+}
+
+.track-row.stem-child-row.current .track-load {
+  color: var(--line);
 }
 
 .track-row-duration {
@@ -1482,4 +1757,33 @@ html[data-platform="apple"] .edit-context-menu kbd[data-shortcut="delete"] {
 .key.active:not(:disabled) {
   background: var(--line);
   color: var(--bg);
+}
+
+/* Keep the native loading bar compact and its width stable as labels change. */
+.stem-progress-copy {
+  min-width: 0;
+  max-width: calc(100% / var(--ui-stretch));
+  height: 9px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font: 500 8px/1 var(--ui-font);
+  font-stretch: expanded;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: scaleX(var(--ui-stretch));
+  transform-origin: left center;
+}
+
+#stem-progress-label {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  font-stretch: expanded;
+  letter-spacing: 0.08em;
 }

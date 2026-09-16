@@ -326,10 +326,11 @@
       }
     }
     const seam = Math.max(0, Math.min(tapeEndMs, start));
-    return [
-      ...shifted.filter((mark) => !(isPointMark(mark) && Math.abs(mark.start - seam) < 0.5)),
-      { type: "cut", start: seam, end: seam },
-    ];
+    const result = shifted.filter((mark) => !(isPointMark(mark) && Math.abs(mark.start - seam) < 0.5));
+    if (start > 0 && seam < tapeEndMs) {
+      result.push({ type: "cut", start: seam, end: seam });
+    }
+    return result;
   }
 
   function remapMarksForReplacement(marks, start, end, insertedMs, type) {

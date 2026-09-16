@@ -151,3 +151,96 @@ test("loop boundaries crossfade instead of popping across a discontinuous crop",
   assert.equal(processor.active, true);
   assert.ok(processor.position > 240 && processor.position < 700);
 });
+
+test("live loop-bound edits take effect without restarting transport", () => {
+  const processor = makeTransport();
+  processor.loop = true;
+  processor.position = SAMPLE_RATE * 3;
+
+  processor.handleMessage({
+    type: "set-bounds",
+    startFrame: SAMPLE_RATE,
+    endFrame: SAMPLE_RATE * 2,
+    loop: true,
+  });
+
+  assert.equal(processor.startFrame, SAMPLE_RATE);
+  assert.equal(processor.endFrame, SAMPLE_RATE * 2);
+  assert.equal(processor.position, SAMPLE_RATE);
+  assert.equal(processor.loop, true);
+  assert.equal(processor.active, true);
+  assert.equal(processor.messages.at(-1).type, "position");
+
+  processor.handleMessage({
+    type: "set-bounds",
+    position: SAMPLE_RATE * 1.5,
+  });
+  assert.equal(processor.position, SAMPLE_RATE * 1.5);
+});
+
+test("turning looping off updates the active transport", () => {
+  const processor = makeTransport();
+  processor.loop = true;
+
+  processor.handleMessage({ type: "set-bounds", loop: false });
+
+  assert.equal(processor.loop, false);
+});
+
+test("replacing the tape buffer keeps playback active at the same position", () => {
+  const processor = makeTransport();
+  render(processor, 1024);
+  const position = processor.position;
+  const replacement = new Float32Array(SAMPLE_RATE * 8).fill(0.25);
+
+  processor.handleMessage({ type: "replace", channels: [replacement] });
+
+  assert.equal(processor.active, true);
+  assert.equal(processor.position, position);
+  assert.equal(processor.channels[0], replacement);
+  assert.equal(processor.messages.at(-1).type, "replaced");
+  const output = render(processor, 512);
+  assert.ok(maxAdjacentDelta(output) < 0.04);
+  assert.ok(processor.replacementFramesLeft > 0, "replacement should crossfade the two moving streams");
+});
+
+test("rapid restarts and live seeks smooth discontinuities instead of popping", () => {
+  const processor = new Processor();
+  const samples = new Float32Array(SAMPLE_RATE);
+  samples.fill(.8, 0, SAMPLE_RATE / 2);
+  samples.fill(-.8, SAMPLE_RATE / 2);
+  processor.handleMessage({ type: 'load', channels: [samples] });
+  processor.handleMessage({ type: 'start', position: 1000, rate: 1, fadeFrames: 384 });
+  const audio = [...render(processor, 500)];
+  for (let i = 0; i < 20; i++) {
+    const position = i % 2 ? 1000 : 30000;
+    processor.handleMessage(i % 3
+      ? { type: 'set-bounds', position }
+      : { type: 'start', position, rate: 1, fadeFrames: 384 });
+    render(processor, 128, audio);
+  }
+  assert.ok(maxAdjacentDelta(audio) < .02);
+});
+
+test("stop fades the DC filter tail as well as the input signal", () => {
+  const processor = new Processor();
+  processor.handleMessage({ type: 'load', channels: [new Float32Array(SAMPLE_RATE).fill(.8)] });
+  processor.handleMessage({ type: 'start', rate: 1, fadeFrames: 384 });
+  const audio = [...render(processor, 6000)];
+  processor.handleMessage({ type: 'stop', fadeFrames: 384 });
+  render(processor, 600, audio);
+  assert.ok(maxAdjacentDelta(audio) < .01);
+  assert.equal(audio.at(-1), 0);
+});
+
+test("disposed processors fade out, release sample storage and stop processing", () => {
+  const processor = makeTransport();
+  render(processor, 500);
+  processor.handleMessage({ type: 'dispose', fadeFrames: 384 });
+  processor.handleMessage({ type: 'set-rate', rate: 1 });
+  const output = new Float32Array(512);
+  assert.equal(processor.process([], [[output]]), false);
+  assert.equal(processor.length, 0);
+  assert.deepEqual(processor.channels, []);
+  assert.equal(output.at(-1), 0);
+});

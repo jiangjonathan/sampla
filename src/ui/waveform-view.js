@@ -46,6 +46,24 @@
     return renderMs + (x - canvas.width / 2) * (waveWindowMs / canvas.width);
   }
 
+  function normalizeWheelDeltas(event, pagePx, linePx = 16) {
+    const mode = Number(event?.deltaMode) || 0;
+    const scale = mode === 1
+      ? linePx
+      : mode === 2
+        ? Math.max(1, pagePx || 1)
+        : 1;
+    return {
+      x: (Number.isFinite(event?.deltaX) ? event.deltaX : 0) * scale,
+      y: (Number.isFinite(event?.deltaY) ? event.deltaY : 0) * scale,
+    };
+  }
+
+  function wheelZoomScale(deltaPx) {
+    const cappedDelta = Math.max(-100, Math.min(100, Number.isFinite(deltaPx) ? deltaPx : 0));
+    return 2 ** (cappedDelta * 0.01);
+  }
+
   function findHandleAt(clientX, canvas, waveWindowMs, centerMs, range, hitPx = 12) {
     if (!range) return null;
     const rect = canvas.getBoundingClientRect();
@@ -53,9 +71,8 @@
     const hit = hitPx * (window.devicePixelRatio || 1);
     const msPerPx = waveWindowMs / canvas.width;
     const headX = canvas.width / 2;
-    const renderMs = waveRenderCenterMs(centerMs, canvas, waveWindowMs);
-    const dStart = Math.abs(x - (headX + (range.start - renderMs) / msPerPx));
-    const dEnd = Math.abs(x - (headX + (range.end - renderMs) / msPerPx));
+    const dStart = Math.abs(x - (headX + (range.start - centerMs) / msPerPx));
+    const dEnd = Math.abs(x - (headX + (range.end - centerMs) / msPerPx));
     return Math.min(dStart, dEnd) > hit ? null : dStart <= dEnd ? "start" : "end";
   }
 
@@ -64,7 +81,7 @@
       ms, waveWindowMs, wavePeaks, mode, editMode, editViewCenterMs,
       editAnimationHeadRatio, editSelection, editMarks, cropBounds,
       activeCropHandle, hoveredCropHandle, activeEditHandle, hoveredEditHandle, hasTape,
-      beatGrid,
+      beatGrid, stemLanes, stemTransition = 1,
     } = options;
 
     const w = canvas.width;
@@ -98,7 +115,8 @@
 
     const marksKey = (editMarks || []).map((mark) => `${mark.type}:${mark.start}:${mark.end}`).join("|");
     const beatKey = beatGrid?.showBeats ? `${beatGrid.beats?.length}:${beatGrid.bars?.length}:${beatGrid.snappedBeatMs}:${beatGrid.transients?.length || 0}` : "";
-    const renderKey = `${w},${h},${renderMs},${waveWindowMs},${wavePeaks.length},${mode},${editMode},${playheadLeft},${waveformRight},${bounds.start},${bounds.end},${activeCropHandle},${hoveredCropHandle},${activeEditHandle},${hoveredEditHandle},${editSelection ? editSelection.start + ":" + editSelection.end : ""},${marksKey},${hasTape},${beatKey}`;
+    const stemKey = stemLanes?.map((lane) => `${lane.peaks.length}:${lane.enabled}:${lane.offsetMs || 0}`).join("|") || "";
+    const renderKey = `${w},${h},${renderMs},${waveWindowMs},${wavePeaks.length},${mode},${editMode},${playheadLeft},${waveformRight},${bounds.start},${bounds.end},${activeCropHandle},${hoveredCropHandle},${activeEditHandle},${hoveredEditHandle},${editSelection ? editSelection.start + ":" + editSelection.end : ""},${marksKey},${hasTape},${beatKey},${stemKey},${stemTransition.toFixed(3)}`;
     if (!recording && canvas._lastRenderKey === renderKey) return;
     canvas._lastRenderKey = renderKey;
 
@@ -116,38 +134,57 @@
       ctx.fillStyle = "rgba(255, 77, 109, 0.18)";
       for (const mark of editMarks) {
         if (BufferOps.isPointMark?.(mark) || mark.type === "cut") continue;
-        const left = Math.max(0, Math.round(headX + (mark.start - renderMs) / msPerPx));
-        const right = Math.min(w, Math.round(headX + (mark.end - renderMs) / msPerPx));
+        const markStart = Math.max(0, Math.min(bounds.end, mark.start));
+        const markEnd = Math.max(0, Math.min(bounds.end, mark.end));
+        if (markEnd <= markStart) continue;
+        const left = Math.max(0, Math.round(headX + (markStart - renderMs) / msPerPx));
+        const right = Math.min(w, Math.round(headX + (markEnd - renderMs) / msPerPx));
         if (right > left) ctx.fillRect(left, 0, right - left, h);
       }
     }
 
-    if (wavePeaks.length || recording) {
-      const ampScale = h * 0.42;
-      const cropStartL = Math.round(headX + (bounds.start - renderMs) / msPerPx - markerWidth / 2);
+    const lanes = stemLanes?.length && stemTransition > 0 ? stemLanes : [{ peaks: wavePeaks, enabled: true }];
+    if (lanes.some((lane) => lane.peaks.length) || recording) {
+      // Crop overlays use the continuous viewport center so they glide during
+      // playback instead of jumping with quantized waveform sampling.
+      const cropStartL = Math.round(headX + (bounds.start - viewCenterMs) / msPerPx - markerWidth / 2);
       const cropStartR = cropStartL + markerWidth;
-      const cropEndL = Math.round(headX + (bounds.end - renderMs) / msPerPx - markerWidth / 2);
+      const cropEndL = Math.round(headX + (bounds.end - viewCenterMs) / msPerPx - markerWidth / 2);
       const cropEndR = cropEndL + markerWidth;
 
       const pDim = new P2D();
       const pLit = new P2D();
       const pSel = editMode ? new P2D() : null;
       const pMod = editMode ? new P2D() : null;
+      const pOff = new P2D();
 
-      for (let x = 0; x < waveformRight; x += columnWidth) {
+      for (let laneIndex = 0; laneIndex < lanes.length; laneIndex++) {
+        const lane = lanes[laneIndex];
+        const finalLaneH = h / lanes.length;
+        const laneH = h + (finalLaneH - h) * stemTransition;
+        const finalMid = finalLaneH * (laneIndex + .5);
+        const waveMid = mid + (finalMid - mid) * stemTransition;
+        const ampScale = laneH * .42;
+        for (let x = 0; x < waveformRight; x += columnWidth) {
         const colStart = (k + Math.round(x / columnWidth) - headCol) * msPerCol;
         const colEnd = colStart + msPerCol;
-        let peak = BufferOps.peakInRange(wavePeaks, colStart, colEnd);
+        const offset = lane.offsetMs || 0;
+        const lanePeak = BufferOps.peakInRange(lane.peaks, colStart - offset, colEnd - offset);
+        const originalPeak = BufferOps.peakInRange(wavePeaks, colStart, colEnd);
+        let peak = originalPeak + (lanePeak - originalPeak) * stemTransition;
         if (recording && colEnd > 0 && colStart <= renderMs) peak = Math.max(peak, 0.002);
         if (peak <= 0) continue;
 
-        const amp = Math.max(1, Math.round(peak * ampScale));
-        const top = Math.max(0, mid - amp);
-        const barH = Math.min(h, mid + amp) - top;
+        const scaled = Math.round(peak * ampScale);
+        if (scaled <= 0 && !recording) continue;
+        const amp = Math.max(1, scaled);
+        const top = Math.max(0, waveMid - amp);
+        const barH = Math.min(h, waveMid + amp) - top;
         const barW = Math.min(columnWidth, waveformRight - x);
         const colR = x + barW;
         const inCropPaint = (sx, sy, sw, sh) => {
-          if (editMode) {
+          if (!lane.enabled) pOff.rect(sx, sy, sw, sh);
+          else if (editMode) {
             if (BufferOps.rangeHasEdit(editMarks || [], colStart, colEnd)) pMod.rect(sx, sy, sw, sh);
             else if (editSelection && colEnd > editSelection.start && colStart < editSelection.end) pSel.rect(sx, sy, sw, sh);
             else pLit.rect(sx, sy, sw, sh);
@@ -171,8 +208,11 @@
           inCropPaint(x, top, barW, barH);
         }
       }
+      }
 
       fillBatch(ctx, pDim, "#3a3a3a");
+      const mutedShade = Math.round(255 - 204 * stemTransition);
+      fillBatch(ctx, pOff, `rgb(${mutedShade}, ${mutedShade}, ${mutedShade})`);
       fillBatch(ctx, pLit, "#ffffff");
       if (editMode) {
         fillBatch(ctx, pSel, "#ffd400");
@@ -189,6 +229,7 @@
       for (const mark of editMarks) {
         const isCut = BufferOps.isPointMark?.(mark) || mark.type === "cut";
         if (isCut) {
+          if (mark.start < 0 || mark.start > bounds.end) continue;
           const x = Math.round(headX + (mark.start - renderMs) / msPerPx - markerWidth / 2);
           if (x + markerWidth < 0 || x > w) continue;
           ctx.fillStyle = "#ff4d6d";
@@ -203,8 +244,11 @@
           ctx.fillText(label, lx, ly);
           continue;
         }
-        const left = Math.max(0, Math.round(headX + (mark.start - renderMs) / msPerPx));
-        const right = Math.min(w, Math.round(headX + (mark.end - renderMs) / msPerPx));
+        const markStart = Math.max(0, Math.min(bounds.end, mark.start));
+        const markEnd = Math.max(0, Math.min(bounds.end, mark.end));
+        if (markEnd <= markStart) continue;
+        const left = Math.max(0, Math.round(headX + (markStart - renderMs) / msPerPx));
+        const right = Math.min(w, Math.round(headX + (markEnd - renderMs) / msPerPx));
         if (right <= left) continue;
         ctx.fillStyle = "#ff4d6d";
         ctx.fillRect(left, h - railH, Math.max(1, right - left), railH);
@@ -233,24 +277,12 @@
       const barTickH = Math.max(6, Math.round(8 * dpr));
       const snappedMs = beatGrid.snappedBeatMs;
 
-      // Draw transient indicators if present
-      if (beatGrid.transients?.length) {
-        const transW = Math.max(1, Math.round(markerWidth));
-        const transH = Math.max(2, Math.round(3 * dpr));
-        for (let t = 0; t < beatGrid.transients.length; t += 1) {
-          const transMs = beatGrid.transients[t];
-          const tx = Math.round(headX + (transMs - renderMs) / msPerPx - transW / 2);
-          if (tx + transW < 0 || tx > w) continue;
-          ctx.fillStyle = "rgba(255, 212, 0, 0.3)";
-          ctx.fillRect(tx, mid - transH / 2, transW, transH);
-        }
-      }
-
       ctx.font = `${Math.max(8, Math.round(7 * dpr))}px "IBM Plex Mono", monospace`;
       ctx.textBaseline = "top";
 
       for (let i = 0; i < beatGrid.beats.length; i += 1) {
         const beatMs = beatGrid.beats[i];
+        if (beatMs < 0 || beatMs > bounds.end) continue;
         const bx = Math.round(headX + (beatMs - renderMs) / msPerPx - markerWidth / 2);
         if (bx + markerWidth < 0 || bx > w) continue;
 
@@ -295,9 +327,9 @@
       }
     }
 
-    if (hasTape) {
-      const cropStartL = Math.round(headX + (bounds.start - renderMs) / msPerPx - markerWidth / 2);
-      const cropEndL = Math.round(headX + (bounds.end - renderMs) / msPerPx - markerWidth / 2);
+    if (hasTape && !editMode) {
+      const cropStartL = Math.round(headX + (bounds.start - viewCenterMs) / msPerPx - markerWidth / 2);
+      const cropEndL = Math.round(headX + (bounds.end - viewCenterMs) / msPerPx - markerWidth / 2);
       for (const [handle, barL] of [["start", cropStartL], ["end", cropEndL]]) {
         if (barL + markerWidth < 0 || barL > w) continue;
         ctx.fillStyle = handle === activeCropHandle || (mode === "idle" && handle === hoveredCropHandle) ? "#ffd400" : "#555555";
@@ -324,6 +356,8 @@
     sizeWave,
     waveRenderCenterMs,
     timeAtClientX,
+    normalizeWheelDeltas,
+    wheelZoomScale,
     cropHandleAt: findHandleAt,
     editHandleAt: findHandleAt,
     drawWave,

@@ -10,6 +10,10 @@
     "check": "npm test && npm run jam:check",
     "jam:check": "node integrations/jam-canvas/scripts/deploy.mjs --check",
     "jam:deploy": "node integrations/jam-canvas/scripts/deploy.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "stems:smoke": "node scripts/stem-smoke.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.30.0"
   }
 }

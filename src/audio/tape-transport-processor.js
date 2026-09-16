@@ -7,6 +7,8 @@ const REPORT_STEADY_FRAMES = 512;
 const MAX_FILTER_CUTOFF = 20000;
 const MIN_SCRUB_FILTER_CUTOFF = 1500;
 const LOOP_CROSSFADE_SECONDS = 0.005;
+const SIGNAL_TRANSITION_FRAMES = Math.max(1, Math.round(sampleRate * 0.005));
+const REPLACEMENT_CROSSFADE_FRAMES = Math.max(1, Math.round(sampleRate * 0.012));
 const DC_BLOCK_COEFFICIENT = Math.exp(-2 * Math.PI / sampleRate);
 
 class TapeTransportProcessor extends AudioWorkletProcessor {
@@ -32,6 +34,12 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
     this.stopping = false;
     this.reportCountdown = 0;
     this.audioTime = 0;
+    this.disposing = false;
+    this.lastOutput = [0, 0];
+    this.transitionFrom = [0, 0];
+    this.transitionFramesLeft = 0;
+    this.replacedChannels = null;
+    this.replacementFramesLeft = 0;
 
     // DC-blocking and anti-aliasing filter states
     this.dcPrevIn = [0, 0];
@@ -42,6 +50,13 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
   }
 
   handleMessage(message) {
+    if (this.disposing) return;
+    if (message.type === "dispose") {
+      this.disposing = true;
+      this.stopping = true;
+      this.setGain(0, message.fadeFrames || SIGNAL_TRANSITION_FRAMES);
+      return;
+    }
     if (message.type === "load") {
       this.channels = message.channels || [];
       this.length = this.channels[0]?.length || 0;
@@ -49,7 +64,28 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
       this.port.postMessage({ type: "loaded" });
       return;
     }
+    if (message.type === "replace") {
+      const channels = message.channels || [];
+      const length = channels[0]?.length || 0;
+      if (!length) return;
+      // Keep the outgoing tape moving under the head while the replacement
+      // fades in. Blending from a frozen last sample creates an audible notch
+      // even when the two buffers contain nearly identical audio.
+      this.replacedChannels = this.channels;
+      this.replacementFramesLeft = this.active && this.length
+        ? REPLACEMENT_CROSSFADE_FRAMES
+        : 0;
+      this.channels = channels;
+      this.length = length;
+      this.startFrame = Math.max(0, Math.min(this.length - 1, this.startFrame));
+      this.endFrame = Math.max(this.startFrame + 1, Math.min(this.length, this.endFrame));
+      this.position = Math.max(this.startFrame, Math.min(this.endFrame - 1, this.position));
+      this.port.postMessage({ type: "replaced", position: this.position, active: this.active });
+      return;
+    }
     if (message.type === "start") {
+      this.beginSignalTransition();
+      this.gain = 0;
       this.startFrame = Math.max(0, message.startFrame || 0);
       this.endFrame = Math.min(this.length, message.endFrame ?? this.length);
       this.position = Math.max(this.startFrame, Math.min(this.endFrame - 1, message.position || 0));
@@ -81,7 +117,46 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
         if (this.gain === 0) this.setGain(1, message.rampFrames || 1);
       }
       this.setRateTarget(requestedRate, message.rampFrames);
+      return;
     }
+    if (message.type === "set-bounds") {
+      const previousPosition = this.position;
+      const startFrame = Number.isFinite(message.startFrame) ? message.startFrame : this.startFrame;
+      const endFrame = Number.isFinite(message.endFrame) ? message.endFrame : this.endFrame;
+      this.startFrame = Math.max(0, Math.min(this.length - 1, startFrame));
+      this.endFrame = Math.max(this.startFrame + 1, Math.min(this.length, endFrame));
+      if (typeof message.loop === "boolean") this.loop = message.loop;
+      if (Number.isFinite(message.position)) this.position = message.position;
+
+      // A bound can be dragged across the live tape head. Move the head into
+      // the new region immediately so playback matches the visible selection.
+      if (this.position < this.startFrame) {
+        this.position = this.startFrame;
+      } else if (this.position >= this.endFrame) {
+        if (this.loop && this.rate > 0) {
+          const span = Math.max(1, this.endFrame - this.startFrame);
+          this.position = this.startFrame
+            + ((this.position - this.startFrame) % span + span) % span;
+        } else {
+          this.position = Math.max(this.startFrame, this.endFrame - 1);
+        }
+      }
+      if (this.position !== previousPosition) this.beginSignalTransition();
+      this.boundaryEdge = null;
+      this.report(true);
+    }
+  }
+
+  beginSignalTransition() {
+    this.transitionFrom = this.lastOutput.slice();
+    this.transitionFramesLeft = SIGNAL_TRANSITION_FRAMES;
+  }
+
+  transitionSample(value, channel) {
+    const mix = this.transitionFramesLeft / SIGNAL_TRANSITION_FRAMES;
+    const output = value * (1 - mix) + (this.transitionFrom[channel] || 0) * mix;
+    this.lastOutput[channel] = output;
+    return output;
   }
 
   setRateTarget(rate, frames) {
@@ -122,10 +197,15 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
   }
 
   sample(channel, position, lowerBound = 0, upperBound = this.length) {
-    const data = this.channels[Math.min(channel, this.channels.length - 1)];
-    if (!data || !this.length) return 0;
-    const first = Math.max(0, Math.min(this.length - 1, Math.floor(lowerBound)));
-    const last = Math.max(first, Math.min(this.length - 1, Math.ceil(upperBound) - 1));
+    return this.sampleFromChannels(this.channels, channel, position, lowerBound, upperBound);
+  }
+
+  sampleFromChannels(channels, channel, position, lowerBound = 0, upperBound = this.length) {
+    const data = channels[Math.min(channel, channels.length - 1)];
+    const length = data?.length || 0;
+    if (!data || !length) return 0;
+    const first = Math.max(0, Math.min(length - 1, Math.floor(lowerBound)));
+    const last = Math.max(first, Math.min(length - 1, Math.ceil(upperBound) - 1));
     const index = Math.max(first, Math.min(last, Math.floor(position)));
     const mix = position - index;
     const p0 = data[Math.max(first, index - 1)];
@@ -167,6 +247,7 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
   }
 
   finishAtBoundary(position) {
+    this.beginSignalTransition();
     this.position = position;
     this.active = false;
     this.gain = 0;
@@ -179,7 +260,13 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
     const frameCount = output[0]?.length || 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
       this.audioTime = (currentFrame + frame) / sampleRate;
-      if (!this.active || !this.length) continue;
+      if (!this.active || !this.length) {
+        for (let channel = 0; channel < output.length; channel++) {
+          output[channel][frame] = this.transitionSample(0, channel);
+        }
+        this.transitionFramesLeft = Math.max(0, this.transitionFramesLeft - 1);
+        continue;
+      }
 
       if (this.position < this.startFrame || this.position >= this.endFrame) {
         if (this.scrubbing) {
@@ -208,6 +295,10 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
           this.position = loopStart + ((this.position - this.endFrame) % loopSpan + loopSpan) % loopSpan;
         } else {
           this.finishAtBoundary(this.rate < 0 ? this.startFrame : this.endFrame);
+          for (let channel = 0; channel < output.length; channel++) {
+            output[channel][frame] = this.transitionSample(0, channel);
+          }
+          this.transitionFramesLeft = Math.max(0, this.transitionFramesLeft - 1);
           continue;
         }
       } else if (
@@ -250,6 +341,17 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
 
       for (let channel = 0; channel < output.length; channel += 1) {
         let rawSample = this.sample(channel, this.position, this.startFrame, this.endFrame);
+        if (this.replacementFramesLeft > 0 && this.replacedChannels?.length) {
+          const outgoing = this.sampleFromChannels(
+            this.replacedChannels,
+            channel,
+            this.position,
+            this.startFrame,
+            this.endFrame,
+          );
+          const replacementMix = 1 - (this.replacementFramesLeft / REPLACEMENT_CROSSFADE_FRAMES);
+          rawSample = outgoing + (rawSample - outgoing) * replacementMix;
+        }
         const crossfadeFrames = this.loop && this.rate > 0 && !this.scrubbing
           ? this.loopCrossfadeFrames()
           : 0;
@@ -270,7 +372,7 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
           this.lpfState[channel] = rawSample;
         }
 
-        const gainedSample = rawSample * this.gain * this.motionGain;
+        const gainedSample = rawSample * this.motionGain;
 
         // Very-low-cut DC blocker. The previous ~6 Hz corner distorted audio
         // that had legitimately been shifted into the sub-bass by slow tape.
@@ -282,9 +384,14 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
         this.dcPrevIn[channel] = gainedSample;
         this.dcPrevOut[channel] = dcOut;
 
-        output[channel][frame] = dcOut;
+        output[channel][frame] = this.transitionSample(dcOut * this.gain, channel);
       }
 
+      this.transitionFramesLeft = Math.max(0, this.transitionFramesLeft - 1);
+      if (this.replacementFramesLeft > 0) {
+        this.replacementFramesLeft -= 1;
+        if (this.replacementFramesLeft === 0) this.replacedChannels = null;
+      }
       this.position += this.rate;
 
       if (this.stopping && this.gain === 0) {
@@ -294,6 +401,11 @@ class TapeTransportProcessor extends AudioWorkletProcessor {
       }
       this.reportCountdown -= 1;
       this.report();
+    }
+    if (this.disposing && !this.active && this.transitionFramesLeft === 0) {
+      this.channels = [];
+      this.length = 0;
+      return false;
     }
     return true;
   }
